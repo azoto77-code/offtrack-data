@@ -1,0 +1,82 @@
+name: Dati Valhalla
+
+# Builds the Valhalla routing tiles for OffTrack from OpenStreetMap, splits them into 1x1 degree packs and publishes
+# them as a release. Runs on the 2nd of every month for all of Italy; by hand it can build a smaller test area.
+on:
+  schedule:
+    - cron: "0 3 2 * *"
+  workflow_dispatch:
+    inputs:
+      area:
+        description: "Area da costruire"
+        type: choice
+        options: [italia, nord-ovest]
+        default: italia
+
+permissions:
+  contents: write
+
+env:
+  # The Valhalla version must read the tiles the same way as the one inside valhalla-mobile on the phone.
+  VALHALLA: "3.6.3"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make room on the disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Choose the area
+        id: area
+        run: |
+          case "${{ inputs.area || 'italia' }}" in
+            nord-ovest) echo "url=https://download.geofabrik.de/europe/italy/nord-ovest-latest.osm.pbf" >> "$GITHUB_OUTPUT"
+                        echo "name=nord-ovest" >> "$GITHUB_OUTPUT" ;;
+            *)          echo "url=https://download.geofabrik.de/europe/italy-latest.osm.pbf" >> "$GITHUB_OUTPUT"
+                        echo "name=italia" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Download OpenStreetMap
+        run: |
+          mkdir -p work
+          curl -fsSL --retry 3 -o work/area.osm.pbf "${{ steps.area.outputs.url }}"
+          ls -la work
+
+      - name: Build the tiles
+        run: |
+          docker run --rm --user root --entrypoint bash -v "$PWD/work:/data" "ghcr.io/valhalla/valhalla:${VALHALLA}" -c '
+            set -e
+            valhalla_build_config --mjolnir-tile-dir /data/tiles --mjolnir-admin /data/admins.sqlite \
+              --mjolnir-concurrency 4 > /data/valhalla.json
+            valhalla_build_admins -c /data/valhalla.json /data/area.osm.pbf
+            valhalla_build_tiles -c /data/valhalla.json /data/area.osm.pbf
+            chmod -R a+rwX /data/tiles'
+          du -sh work/tiles
+
+      - name: Split into packs
+        run: |
+          python3 tools/split_tiles.py work/tiles packs --valhalla "${VALHALLA}" --source "${{ steps.area.outputs.url }}"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="valhalla-${{ steps.area.outputs.name }}-$(date -u +%Y%m%d)"
+          latest=false
+          [ "${{ steps.area.outputs.name }}" = italia ] && latest=true
+          gh release create "$tag" packs/* --title "$tag" --latest=$latest \
+            --notes "Tile Valhalla ${VALHALLA} da OpenStreetMap (${{ steps.area.outputs.url }}). Dati © OpenStreetMap, licenza ODbL."
+
+      - name: Keep the last two releases of each area
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --limit 100 --json tagName --jq '.[].tagName' \
+            | grep "^valhalla-${{ steps.area.outputs.name }}-" | sort -r | tail -n +3 \
+            | xargs -r -I{} gh release delete {} --yes --cleanup-tag
