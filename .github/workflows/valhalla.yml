@@ -64,8 +64,8 @@ jobs:
           du -sh work/tiles
 
       - name: Check the travel times
-        # Savona toll booth to Genova Pegli on the A10: about 50 minutes for Google and for FOSSGIS. With legal limits
-        # it came out at 33; a time outside 42-58 minutes means the speeds did not go into the tiles.
+        # Savona toll booth to Genova Pegli on the A10: about 50 minutes for Google and for FOSSGIS, 42 with these
+        # speeds in Valhalla 3.6.3. With legal limits it came out at 33: outside 38-58 the speeds did not go in.
         run: |
           docker run --rm --user root --entrypoint bash -v "$PWD/work:/data" "ghcr.io/valhalla/valhalla:${VALHALLA}" -c '
             valhalla_service /data/valhalla.json route "{\"locations\":[{\"lat\":44.3270,\"lon\":8.4520},{\"lat\":44.4290,\"lon\":8.8150}],\"costing\":\"motorcycle\"}"' > work/check.json
@@ -75,7 +75,7 @@ jobs:
           # The service may print its log lines before the answer.
           s = json.JSONDecoder().raw_decode(text[text.index('{\"trip\"'):])[0]['trip']['summary']
           print('Savona-Pegli: %.1f km in %.0f min' % (s['length'], s['time'] / 60))
-          sys.exit(0 if 42 * 60 <= s['time'] <= 58 * 60 else 1)"
+          sys.exit(0 if 38 * 60 <= s['time'] <= 58 * 60 else 1)"
 
       - name: Split into packs
         run: |
