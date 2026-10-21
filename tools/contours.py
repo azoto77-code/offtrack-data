@@ -14,6 +14,7 @@ import io
 import json
 import math
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -111,51 +112,56 @@ def minzoom(ele):
 
 
 def block(job):
-    """Contour lines of one block of 16x16 tiles, clipped to the block and to the area, as GeoJSON text lines."""
-    bx, by, area, interval, cache = job
+    """Contour lines of one block of 16x16 tiles, clipped to the block and to the area, written as GeoJSON text lines
+    to [dest]. The lines are read one at a time: an Alpine block traces hundreds of megabytes of them."""
+    bx, by, area, interval, cache, dest = job
     x0, y0 = bx * BLOCK - 1, by * BLOCK - 1
     side = (BLOCK + 2) * TILE
     dem = np.empty((side, side), dtype=np.float32)
     for j in range(BLOCK + 2):
         for i in range(BLOCK + 2):
             dem[j * TILE:(j + 1) * TILE, i * TILE:(i + 1) * TILE] = elevations(fetch(x0 + i, y0 + j, cache))
-    # A light blur takes the steps of the 1 m rounding and of the source models out of the lines.
-    dem = gaussian_filter(dem, 1.0)
-    with tempfile.TemporaryDirectory() as tmp:
-        bil = os.path.join(tmp, "dem.bil")
-        dem.astype("<f4").tofile(bil)
-        # Georeferenced in global pixels, north up: x to the east, -y to the north.
-        Path(tmp, "dem.hdr").write_text(
-            f"BYTEORDER I\nLAYOUT BIL\nNROWS {side}\nNCOLS {side}\nNBANDS 1\nNBITS 32\nPIXELTYPE FLOAT\n"
-            f"ULXMAP {x0 * TILE + 0.5}\nULYMAP {-(y0 * TILE + 0.5)}\nXDIM 1\nYDIM 1\n")
-        out = os.path.join(tmp, "lines.geojsonseq")
-        subprocess.run(["gdal_contour", "-q", "-a", "ele", "-i", str(interval), "-f", "GeoJSONSeq", bil, out],
-                       check=True)
-        lines = [json.loads(s.lstrip("\x1e")) for s in Path(out).read_text().splitlines() if s.strip()]
     core = box(tile_lon(x0 + 1), tile_lat(y0 + 1 + BLOCK), tile_lon(x0 + 1 + BLOCK), tile_lat(y0 + 1))
     inside = area.intersection(core)
     whole = inside.equals(core)
     prepare(inside)
-    text = []
-    for f in lines:
-        ele = int(round(f["properties"]["ele"]))
-        if ele <= 0:
-            continue
-        g = LineString(to_lonlat(f["geometry"]["coordinates"]))
-        g = clip_by_rect(g, *core.bounds) if whole else g.intersection(inside)
-        if g.is_empty:
-            continue
-        parts = [g] if isinstance(g, LineString) else [p for p in getattr(g, "geoms", []) if isinstance(p, LineString)]
-        for p in parts:
-            # About 4 m: well under a pixel of the elevations, and it takes most of the points off steady slopes.
-            p = p.simplify(0.00004)
-            if len(p.coords) < 2:
-                continue
-            coords = [[round(lon, 5), round(lat, 5)] for lon, lat in p.coords]
-            text.append("\x1e" + json.dumps({
-                "type": "Feature", "properties": {"ele": ele, "minz": minzoom(ele)},
-                "geometry": {"type": "LineString", "coordinates": coords}}, separators=(",", ":")) + "\n")
-    return "".join(text)
+    with tempfile.TemporaryDirectory() as tmp, open(dest, "w") as out:
+        bil = os.path.join(tmp, "dem.bil")
+        # A light blur takes the steps of the 1 m rounding and of the source models out of the lines.
+        gaussian_filter(dem, 1.0).astype("<f4").tofile(bil)
+        del dem
+        # Georeferenced in global pixels, north up: x to the east, -y to the north.
+        Path(tmp, "dem.hdr").write_text(
+            f"BYTEORDER I\nLAYOUT BIL\nNROWS {side}\nNCOLS {side}\nNBANDS 1\nNBITS 32\nPIXELTYPE FLOAT\n"
+            f"ULXMAP {x0 * TILE + 0.5}\nULYMAP {-(y0 * TILE + 0.5)}\nXDIM 1\nYDIM 1\n")
+        lines = os.path.join(tmp, "lines.geojsonseq")
+        subprocess.run(["gdal_contour", "-q", "-a", "ele", "-i", str(interval), "-f", "GeoJSONSeq", bil, lines],
+                       check=True)
+        os.remove(bil)
+        with open(lines) as src:
+            for s in src:
+                s = s.lstrip("\x1e").strip()
+                if not s:
+                    continue
+                f = json.loads(s)
+                ele = int(round(f["properties"]["ele"]))
+                if ele <= 0:
+                    continue
+                g = LineString(to_lonlat(f["geometry"]["coordinates"]))
+                g = clip_by_rect(g, *core.bounds) if whole else g.intersection(inside)
+                if g.is_empty:
+                    continue
+                parts = [g] if isinstance(g, LineString) else [p for p in getattr(g, "geoms", []) if isinstance(p, LineString)]
+                for p in parts:
+                    # About 4 m: well under a pixel of the elevations, and it takes most of the points off steady slopes.
+                    p = p.simplify(0.00004)
+                    if len(p.coords) < 2:
+                        continue
+                    coords = [[round(lon, 5), round(lat, 5)] for lon, lat in p.coords]
+                    out.write("\x1e" + json.dumps({
+                        "type": "Feature", "properties": {"ele": ele, "minz": minzoom(ele)},
+                        "geometry": {"type": "LineString", "coordinates": coords}}, separators=(",", ":")) + "\n")
+    return dest
 
 
 def main():
@@ -176,11 +182,14 @@ def main():
         list(ex.map(lambda t: fetch(t[0], t[1], a.cache), need))
     print("quote scaricate", flush=True)
     jobs = [(bx, by, area.intersection(box(tile_lon(bx * BLOCK), tile_lat((by + 1) * BLOCK),
-                                           tile_lon((bx + 1) * BLOCK), tile_lat(by * BLOCK))), a.interval, a.cache)
+                                           tile_lon((bx + 1) * BLOCK), tile_lat(by * BLOCK))), a.interval, a.cache,
+             f"{a.out}.{bx}_{by}")
             for bx, by in blocks]
     with open(a.out, "w") as out, Pool(a.jobs) as pool:
-        for k, text in enumerate(pool.imap(block, jobs)):
-            out.write(text)
+        for k, part in enumerate(pool.imap(block, jobs)):
+            with open(part) as src:
+                shutil.copyfileobj(src, out)
+            os.remove(part)
             print(f"blocco {k + 1}/{len(jobs)}", flush=True)
 
 
