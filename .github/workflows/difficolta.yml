@@ -1,0 +1,145 @@
+name: Mappa difficoltà
+
+# Builds the difficulty map of OffTrack: the unpaved roads and paths of OpenStreetMap with their level 1-5, as one
+# PMTiles file the app downloads zone by zone. Runs on the 3rd of every month for all the zones; by hand it can build
+# the north-west alone. A pull request that changes it builds the north-west and keeps the file as an artifact.
+on:
+  schedule:
+    - cron: "0 3 3 * *"
+  workflow_dispatch:
+    inputs:
+      area:
+        description: "Area da costruire"
+        type: choice
+        options: [tutte, nord-ovest]
+        default: tutte
+  pull_request:
+    paths:
+      - ".github/workflows/difficolta.yml"
+      - "tools/difficulty_layer.py"
+      - "tools/test_difficulty_layer.py"
+
+permissions:
+  contents: write
+
+env:
+  GEOFABRIK: "https://download.geofabrik.de/europe"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osmium-tool tippecanoe python3-pyosmium
+
+      - name: Check the levels
+        working-directory: tools
+        run: python3 -m unittest test_difficulty_layer -v
+
+      - name: Choose the area
+        id: area
+        # One line per extract: name, path on Geofabrik, and a box to cut it to (Sardinia out of the islands).
+        run: |
+          area="${{ inputs.area || 'tutte' }}"
+          [ "${{ github.event_name }}" = pull_request ] && area=nord-ovest
+          if [ "$area" = nord-ovest ]; then
+            echo "nord-ovest italy/nord-ovest -" > extracts.txt
+          else
+            cat > extracts.txt <<'EOF'
+          nord-ovest italy/nord-ovest -
+          nord-est italy/nord-est -
+          sardegna italy/isole 8.05,38.80,10.00,41.35
+          provenza france/provence-alpes-cote-d-azur -
+          rodano-alpi france/rhone-alpes -
+          corsica france/corse -
+          EOF
+          fi
+          sed -i 's/^ *//' extracts.txt
+          cat extracts.txt
+          echo "name=$area" >> "$GITHUB_OUTPUT"
+
+      - name: Download OpenStreetMap
+        run: |
+          mkdir -p work
+          while read -r name path cut; do
+            curl -fsSL --retry 3 -o "work/$name-full.osm.pbf" "$GEOFABRIK/$path-latest.osm.pbf"
+            if [ "$cut" != - ]; then
+              osmium extract -b "$cut" "work/$name-full.osm.pbf" -o "work/$name-cut.osm.pbf"
+              mv "work/$name-cut.osm.pbf" "work/$name-full.osm.pbf"
+            fi
+            # Only the ways with a highway tag and their nodes: a tenth of the file.
+            osmium tags-filter "work/$name-full.osm.pbf" w/highway -o "work/$name.osm.pbf"
+            rm "work/$name-full.osm.pbf"
+          done < extracts.txt
+          ls -la work
+
+      - name: Give each road its level
+        run: python3 tools/difficulty_layer.py work/difficolta.geojsonseq work/*.osm.pbf
+
+      - name: Build the tiles
+        # Tracks and unpaved roads from zoom 11, paths from 12 ("minz"); beyond 14 the app enlarges the last level.
+        run: |
+          tippecanoe -q -P -o difficolta.pmtiles -l difficolta \
+            -n "OffTrack difficoltà" -A "© OpenStreetMap contributors" \
+            -Z11 -z14 --no-feature-limit --no-tile-size-limit \
+            -j '{"*":["any",["==","minz",11],[">=","$zoom",12]]}' \
+            work/difficolta.geojsonseq
+          ls -la difficolta.pmtiles
+
+      - name: Write the index
+        run: |
+          mkdir -p out
+          mv difficolta.pmtiles out/
+          python3 - <<'EOF'
+          import datetime, hashlib, json, os
+          path = "out/difficolta.pmtiles"
+          sha = hashlib.sha256()
+          with open(path, "rb") as f:
+              for chunk in iter(lambda: f.read(1 << 20), b""):
+                  sha.update(chunk)
+          extracts = [line.split() for line in open("extracts.txt") if line.strip()]
+          index = {
+              "date": datetime.date.today().isoformat(),
+              "file": "difficolta.pmtiles",
+              "bytes": os.path.getsize(path),
+              "sha256": sha.hexdigest(),
+              "minzoom": 11,
+              "maxzoom": 14,
+              "zones": [{"name": n, "source": f"{os.environ['GEOFABRIK']}/{p}-latest.osm.pbf"} for n, p, _ in extracts],
+          }
+          json.dump(index, open("out/index.json", "w"), indent=1)
+          print(json.dumps(index, indent=1))
+          print(f"difficolta.pmtiles: {index['bytes'] / 1e6:.1f} MB")
+          EOF
+
+      - name: Keep the test file
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: difficolta-nord-ovest
+          path: out/
+          retention-days: 14
+
+      - name: Publish the release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Never "latest": that one stays the Valhalla release the app reads.
+        run: |
+          tag="difficolta-${{ steps.area.outputs.name }}-$(date -u +%Y%m%d)"
+          gh release create "$tag" out/* --title "$tag" --latest=false \
+            --notes "Mappa difficoltà di OffTrack: sterrati e sentieri di OpenStreetMap con il loro livello. Dati © OpenStreetMap, licenza ODbL."
+
+      - name: Keep the last two releases of each area
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --limit 100 --json tagName --jq '.[].tagName' \
+            | grep "^difficolta-${{ steps.area.outputs.name }}-" | sort -r | tail -n +3 \
+            | xargs -r -I{} gh release delete {} --yes --cleanup-tag

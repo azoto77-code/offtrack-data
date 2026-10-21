@@ -12,3 +12,17 @@ Ogni release contiene:
 L'app legge `releases/latest/download/index.json` e scarica i pacchetti dei quadrati che toccano l'area scelta. Poi li estrae tutti nella stessa cartella dei tile.
 
 Dati © OpenStreetMap contributors, licenza [ODbL](https://opendatacommons.org/licenses/odbl/).
+
+## Mappa difficoltà
+
+L'azione **Mappa difficoltà** gira il 3 di ogni mese. Scarica da Geofabrik gli estratti di Nord-Ovest, Nord-Est, Sardegna, Provenza-Alpi-Costa Azzurra, Rodano-Alpi e Corsica, tiene sterrati e sentieri e dà a ciascuno un livello da 1 a 5. Le regole sono quelle di `Levels.kt` nell'app, riportate in `tools/difficulty_layer.py`: vanno cambiate insieme. Il risultato è un solo file `difficolta.pmtiles` (zoom 11-14, strato `difficolta`), pubblicato come release `difficolta-<area>-<data>` con il suo `index.json`.
+
+Ogni via porta `lvl` (livello), `why` (il tag che l'ha deciso), `guess` se il livello è una stima per mancanza di tag, `banned` con il tag che la chiude alle moto, `minz` (lo zoom da cui si vede) e i suoi tag OpenStreetMap: `highway`, `name`, `tracktype`, `surface`, `smoothness`, `sac_scale`, `mtb:scale` e gli altri.
+
+## Curve di livello
+
+L'azione **Curve di livello** si avvia a mano, perché il terreno non cambia. Prende le quote dai Terrain Tiles pubblici su AWS (circa 30 m per pixel) per le stesse zone e traccia le curve ogni 10 m con `gdal_contour`. Il risultato è `curve.pmtiles` (zoom 10-12, strato `curve`, attributo `ele`), pubblicato come release `curve-<area>-<data>`.
+
+Le release di queste due azioni non sono mai segnate come "latest", che resta quella di Valhalla.
+
+Una pull request che cambia una delle due azioni costruisce solo il Nord-Ovest e lascia il file tra gli artifact dell'esecuzione.

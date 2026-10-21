@@ -1,0 +1,122 @@
+name: Curve di livello
+
+# Builds the contour lines OffTrack draws over every map, every 10 m, as one PMTiles file the app downloads zone by
+# zone. The terrain does not change, so it runs only by hand; a pull request that changes it builds the north-west and
+# keeps the file as an artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      area:
+        description: "Area da costruire"
+        type: choice
+        options: [tutte, nord-ovest]
+        default: tutte
+  pull_request:
+    paths:
+      - ".github/workflows/curve.yml"
+      - "tools/contours.py"
+
+permissions:
+  contents: write
+
+env:
+  GEOFABRIK: "https://download.geofabrik.de/europe"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make room on the disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Install the tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gdal-bin tippecanoe python3-numpy python3-scipy python3-shapely python3-pil
+
+      - name: Choose the area
+        id: area
+        # The same zones as the difficulty map, by the outlines Geofabrik publishes; Sardinia is a box of its own.
+        run: |
+          area="${{ inputs.area || 'tutte' }}"
+          [ "${{ github.event_name }}" = pull_request ] && area=nord-ovest
+          mkdir -p areas
+          if [ "$area" = nord-ovest ]; then
+            paths="italy/nord-ovest"
+          else
+            paths="italy/nord-ovest italy/nord-est france/provence-alpes-cote-d-azur france/rhone-alpes france/corse"
+            cp tools/areas/sardegna.poly areas/
+          fi
+          for p in $paths; do
+            curl -fsSL --retry 3 -o "areas/$(basename "$p").poly" "$GEOFABRIK/$p.poly"
+          done
+          ls -la areas
+          echo "name=$area" >> "$GITHUB_OUTPUT"
+
+      - name: Trace the lines
+        run: python3 tools/contours.py curve.geojsonseq areas/*.poly --cache dem-cache --jobs 4
+
+      - name: Build the tiles
+        # Every 100 m from zoom 10, every 50 m from 11, every 10 m from 12 ("minz"); beyond 12 the app enlarges it.
+        run: |
+          rm -rf dem-cache
+          tippecanoe -q -P -o curve.pmtiles -l curve \
+            -n "OffTrack curve di livello" -A "Terrain Tiles: SRTM, EU-DEM (Copernicus), Mapzen" \
+            -Z10 -z12 --no-feature-limit --no-tile-size-limit \
+            -j '{"*":["any",["==","minz",10],["all",["==","minz",11],[">=","$zoom",11]],[">=","$zoom",12]]}' \
+            curve.geojsonseq
+          mkdir -p out
+          mv curve.pmtiles out/
+          python3 - <<'EOF'
+          import datetime, glob, hashlib, json, os
+          path = "out/curve.pmtiles"
+          sha = hashlib.sha256()
+          with open(path, "rb") as f:
+              for chunk in iter(lambda: f.read(1 << 20), b""):
+                  sha.update(chunk)
+          index = {
+              "date": datetime.date.today().isoformat(),
+              "file": "curve.pmtiles",
+              "bytes": os.path.getsize(path),
+              "sha256": sha.hexdigest(),
+              "minzoom": 10,
+              "maxzoom": 12,
+              "interval_m": 10,
+              "zones": sorted(os.path.basename(p)[:-5] for p in glob.glob("areas/*.poly")),
+          }
+          json.dump(index, open("out/index.json", "w"), indent=1)
+          print(json.dumps(index, indent=1))
+          print(f"curve.pmtiles: {index['bytes'] / 1e6:.1f} MB")
+          EOF
+
+      - name: Keep the test file
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: curve-nord-ovest
+          path: out/
+          retention-days: 14
+
+      - name: Publish the release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Never "latest": that one stays the Valhalla release the app reads.
+        run: |
+          tag="curve-${{ steps.area.outputs.name }}-$(date -u +%Y%m%d)"
+          gh release create "$tag" out/* --title "$tag" --latest=false \
+            --notes "Curve di livello ogni 10 m per OffTrack, dai Terrain Tiles su AWS (SRTM, EU-DEM prodotto con dati Copernicus, Mapzen)."
+
+      - name: Keep the last two releases of each area
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --limit 100 --json tagName --jq '.[].tagName' \
+            | grep "^curve-${{ steps.area.outputs.name }}-" | sort -r | tail -n +3 \
+            | xargs -r -I{} gh release delete {} --yes --cleanup-tag
