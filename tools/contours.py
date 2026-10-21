@@ -3,10 +3,10 @@
 
 The elevations are the public Terrain Tiles on AWS (Terrarium PNG, about 30 m a pixel at zoom 12 in Europe). They are
 joined into blocks of 16x16 tiles with one tile of margin, so the lines carry on from one block to the next, smoothed
-a little and traced by gdal_contour. Each line keeps its elevation ("ele") and the zoom it appears from ("minz"): every
-100 m from zoom 10, every 50 m from 11, the others from 12.
+a little and traced by gdal_contour, every 20 m. Each line keeps its elevation ("ele") and the zoom it appears from
+("minz"): every 100 m from zoom 10, the others from 12.
 
-    contours.py OUT.geojsonseq AREA.poly [AREA.poly ...] [--interval 10] [--cache DIR] [--jobs 4]
+    contours.py OUT.geojsonseq AREA.poly [AREA.poly ...] [--interval 20] [--cache DIR] [--jobs 4]
 """
 import argparse
 import concurrent.futures as cf
@@ -108,7 +108,7 @@ def to_lonlat(coords):
 
 
 def minzoom(ele):
-    return 10 if ele % 100 == 0 else 11 if ele % 50 == 0 else 12
+    return 10 if ele % 100 == 0 else 12
 
 
 def block(job):
@@ -168,7 +168,7 @@ def main():
     p = argparse.ArgumentParser(description="Curve di livello per OffTrack")
     p.add_argument("out")
     p.add_argument("areas", nargs="+")
-    p.add_argument("--interval", type=int, default=10)
+    p.add_argument("--interval", type=int, default=20)
     p.add_argument("--cache", default="dem-cache")
     p.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     a = p.parse_args()

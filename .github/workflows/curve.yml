@@ -1,6 +1,6 @@
 name: Curve di livello
 
-# Builds the contour lines OffTrack draws over every map, every 10 m, as one PMTiles file the app downloads zone by
+# Builds the contour lines OffTrack draws over every map, every 20 m, as one PMTiles file the app downloads zone by
 # zone. The terrain does not change, so it runs only by hand; a pull request that changes it builds the north-west and
 # keeps the file as an artifact.
 on:
@@ -62,13 +62,13 @@ jobs:
         run: python3 tools/contours.py curve.geojsonseq areas/*.poly --cache dem-cache --jobs 4
 
       - name: Build the tiles
-        # Every 100 m from zoom 10, every 50 m from 11, every 10 m from 12 ("minz"); beyond 12 the app enlarges it.
+        # Every 100 m from zoom 10, every 20 m from 12 ("minz"); beyond 12 the app enlarges it.
         run: |
           rm -rf dem-cache
           tippecanoe -q -P -o curve.pmtiles -l curve \
             -n "OffTrack curve di livello" -A "Terrain Tiles: SRTM, EU-DEM (Copernicus), Mapzen" \
             -Z10 -z12 --no-feature-limit --no-tile-size-limit \
-            -j '{"*":["any",["==","minz",10],["all",["==","minz",11],[">=","$zoom",11]],[">=","$zoom",12]]}' \
+            -j '{"*":["any",["==","minz",10],[">=","$zoom",12]]}' \
             curve.geojsonseq
           mkdir -p out
           mv curve.pmtiles out/
@@ -86,7 +86,7 @@ jobs:
               "sha256": sha.hexdigest(),
               "minzoom": 10,
               "maxzoom": 12,
-              "interval_m": 10,
+              "interval_m": 20,
               "zones": sorted(os.path.basename(p)[:-5] for p in glob.glob("areas/*.poly")),
           }
           json.dump(index, open("out/index.json", "w"), indent=1)
@@ -110,7 +110,7 @@ jobs:
         run: |
           tag="curve-${{ steps.area.outputs.name }}-$(date -u +%Y%m%d)"
           gh release create "$tag" out/* --title "$tag" --latest=false \
-            --notes "Curve di livello ogni 10 m per OffTrack, dai Terrain Tiles su AWS (SRTM, EU-DEM prodotto con dati Copernicus, Mapzen)."
+            --notes "Curve di livello ogni 20 m per OffTrack, dai Terrain Tiles su AWS (SRTM, EU-DEM prodotto con dati Copernicus, Mapzen)."
 
       - name: Keep the last two releases of each area
         if: github.event_name != 'pull_request'

@@ -21,7 +21,7 @@ Ogni via porta `lvl` (livello), `why` (il tag che l'ha deciso), `guess` se il li
 
 ## Curve di livello
 
-L'azione **Curve di livello** si avvia a mano, perché il terreno non cambia. Prende le quote dai Terrain Tiles pubblici su AWS (circa 30 m per pixel) per le stesse zone e traccia le curve ogni 10 m con `gdal_contour`. Il risultato è `curve.pmtiles` (zoom 10-12, strato `curve`, attributo `ele`), pubblicato come release `curve-<area>-<data>`.
+L'azione **Curve di livello** si avvia a mano, perché il terreno non cambia. Prende le quote dai Terrain Tiles pubblici su AWS (circa 30 m per pixel) per le stesse zone e traccia le curve ogni 20 m con `gdal_contour`: quelle ogni 100 m dallo zoom 10, le altre dallo zoom 12. Il risultato è `curve.pmtiles` (zoom 10-12, strato `curve`, attributo `ele`), pubblicato come release `curve-<area>-<data>`.
 
 Le release di queste due azioni non sono mai segnate come "latest", che resta quella di Valhalla.
 
