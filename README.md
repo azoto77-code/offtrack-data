@@ -26,3 +26,12 @@ L'azione **Curve di livello** si avvia a mano, perché il terreno non cambia. Pr
 Le release di queste due azioni non sono mai segnate come "latest", che resta quella di Valhalla.
 
 Una pull request che cambia una delle due azioni costruisce solo il Nord-Ovest e lascia il file tra gli artifact dell'esecuzione.
+
+## Zone offline
+
+L'azione **Zone POI e quote** gira il 4 di ogni mese e prepara le due parti delle zone offline dell'app che non hanno un'altra fonte, un file per quadrato da 1°×1° (gli stessi quadrati dei pacchetti Valhalla):
+
+- `N44E008-poi.json.gz`, i punti di interesse delle categorie di `PoiCatalog.kt`, letti da Geofabrik per l'Italia e le zone francesi della mappa difficoltà, con le stesse colonne della tabella POI dell'app. Le categorie sono riportate in `tools/poi_squares.py`: vanno cambiate insieme;
+- `N44E008.hgt.gz`, le quote a 90 m (griglia SRTM da 1201×1201) prese dai Terrain Tiles su AWS, per il profilo delle tracce senza quote.
+
+Il risultato è la release `zone-<area>-<data>` con il suo `index.json`, che elenca ogni quadrato con dimensione, sha256 e numero di punti.

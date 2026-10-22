@@ -1,0 +1,155 @@
+name: Zone POI e quote
+
+# Builds the two parts of OffTrack's offline zones that have no other source: the points of interest and the
+# elevations, one file each per square of 1x1 degree, the same squares as the Valhalla packs. Runs on the 4th of every
+# month, after Valhalla (2nd) and the difficulty map (3rd); by hand it can build the north-west alone. A pull request
+# that changes it builds the north-west and keeps the files as an artifact.
+on:
+  schedule:
+    - cron: "0 3 4 * *"
+  workflow_dispatch:
+    inputs:
+      area:
+        description: "Area da costruire"
+        type: choice
+        options: [tutte, nord-ovest]
+        default: tutte
+  pull_request:
+    paths:
+      - ".github/workflows/zone.yml"
+      - "tools/poi_squares.py"
+      - "tools/dem_squares.py"
+      - "tools/test_poi_squares.py"
+
+permissions:
+  contents: write
+
+env:
+  GEOFABRIK: "https://download.geofabrik.de/europe"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osmium-tool python3-pyosmium python3-numpy
+
+      - name: Check the kinds
+        working-directory: tools
+        run: python3 -m unittest test_poi_squares -v
+
+      - name: Choose the area
+        id: area
+        # One line per extract: name, path on Geofabrik, and whether speed cameras may be shown there.
+        # All of Italy, as Valhalla, and the French zones of the difficulty map.
+        run: |
+          area="${{ inputs.area || 'tutte' }}"
+          [ "${{ github.event_name }}" = pull_request ] && area=nord-ovest
+          if [ "$area" = nord-ovest ]; then
+            echo "nord-ovest italy/nord-ovest cameras" > extracts.txt
+          else
+            cat > extracts.txt <<'EOF'
+          italia italy cameras
+          provenza france/provence-alpes-cote-d-azur -
+          rodano-alpi france/rhone-alpes -
+          corsica france/corse -
+          EOF
+          fi
+          sed -i 's/^ *//' extracts.txt
+          cat extracts.txt
+          echo "name=$area" >> "$GITHUB_OUTPUT"
+
+      - name: Download OpenStreetMap
+        # Only what can be a point of interest, plus the tracks for their gates: a small part of each file.
+        run: |
+          mkdir -p work
+          while read -r name path cameras; do
+            curl -fsSL --retry 3 -o "work/$name-full.osm.pbf" "$GEOFABRIK/$path-latest.osm.pbf"
+            osmium tags-filter "work/$name-full.osm.pbf" \
+              nwr/amenity nwr/shop nwr/tourism nwr/man_made=water_tap nwr/natural=spring \
+              nwr/emergency=defibrillator nwr/mountain_pass=yes nwr/ford=yes \
+              n/barrier=gate n/highway=speed_camera w/highway=track \
+              -o "work/$name.osm.pbf"
+            rm "work/$name-full.osm.pbf"
+          done < extracts.txt
+          ls -la work
+
+      - name: Write the points of interest
+        run: |
+          inputs=$(awk '{print "work/" $1 ".osm.pbf"}' extracts.txt)
+          banned=$(awk '$3 != "cameras" {print "work/" $1 ".osm.pbf"}' extracts.txt)
+          python3 tools/poi_squares.py out $inputs --no-cameras $banned
+
+      - name: Write the elevations
+        # The squares that have points of interest, so the open sea is left out.
+        run: |
+          squares=$(ls out | sed -n 's/-poi\.json\.gz$//p')
+          python3 tools/dem_squares.py out $squares
+
+      - name: Write the index
+        run: |
+          python3 - <<'EOF'
+          import datetime, gzip, hashlib, json, os
+          def describe(path):
+              sha = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1 << 20), b""):
+                      sha.update(chunk)
+              return {"file": os.path.basename(path), "bytes": os.path.getsize(path), "sha256": sha.hexdigest()}
+          squares = []
+          for f in sorted(os.listdir("out")):
+              if not f.endswith("-poi.json.gz"):
+                  continue
+              name = f[: -len("-poi.json.gz")]
+              poi = describe(f"out/{f}")
+              with gzip.open(f"out/{f}", "rt", encoding="utf-8") as g:
+                  poi["count"] = json.load(g)["count"]
+              square = {"name": name, "poi": poi}
+              if os.path.exists(f"out/{name}.hgt.gz"):
+                  square["dem"] = describe(f"out/{name}.hgt.gz")
+              squares.append(square)
+          extracts = [line.split() for line in open("extracts.txt") if line.strip()]
+          index = {
+              "date": datetime.date.today().isoformat(),
+              "squares": squares,
+              "sources": [f"{os.environ['GEOFABRIK']}/{p}-latest.osm.pbf" for _, p, _ in extracts],
+              "dem": "https://registry.opendata.aws/terrain-tiles/",
+          }
+          json.dump(index, open("out/index.json", "w"), indent=1)
+          total = sum(s["poi"]["bytes"] + s.get("dem", {}).get("bytes", 0) for s in squares)
+          print(f"{len(squares)} quadrati, {sum(s['poi']['count'] for s in squares)} punti, {total / 1e6:.1f} MB")
+          for s in squares:
+              print(s["name"], s["poi"]["count"], f"{s['poi']['bytes'] / 1e6:.2f} MB", f"{s.get('dem', {}).get('bytes', 0) / 1e6:.2f} MB")
+          EOF
+
+      - name: Keep the test files
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: zone-nord-ovest
+          path: out/
+          retention-days: 14
+
+      - name: Publish the release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Never "latest": that one stays the Valhalla release the app reads.
+        run: |
+          tag="zone-${{ steps.area.outputs.name }}-$(date -u +%Y%m%d)"
+          gh release create "$tag" out/* --title "$tag" --latest=false \
+            --notes "Zone offline di OffTrack: punti di interesse da OpenStreetMap (© OpenStreetMap contributors, licenza ODbL) e quote a 90 m dai Terrain Tiles su AWS (SRTM, EU-DEM prodotto con dati Copernicus, Mapzen), un file per quadrato da 1°."
+
+      - name: Keep the last two releases of each area
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --limit 100 --json tagName --jq '.[].tagName' \
+            | grep "^zone-${{ steps.area.outputs.name }}-" | sort -r | tail -n +3 \
+            | xargs -r -I{} gh release delete {} --yes --cleanup-tag
