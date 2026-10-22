@@ -26,3 +26,20 @@ L'azione **Curve di livello** si avvia a mano, perché il terreno non cambia. Pr
 Le release di queste due azioni non sono mai segnate come "latest", che resta quella di Valhalla.
 
 Una pull request che cambia una delle due azioni costruisce solo il Nord-Ovest e lascia il file tra gli artifact dell'esecuzione.
+
+## Zone offline
+
+L'azione **Zone offline** gira il 4 di ogni mese e costruisce le zone che l'app scarica per funzionare senza rete (meteo escluso). Le zone sono elencate in `zone/zone.json`, una riga ciascuna con il suo estratto Geofabrik: per aggiungerne una basta una riga, e la volta dopo l'azione la costruisce.
+
+Ogni zona diventa la release `zona-<id>-<edizione>`, con tutti i dati presi lo stesso giorno da OpenStreetMap:
+
+- `valhalla.tar`, i tile per il calcolo dei percorsi. Valhalla è costruito una volta sola per tutte le zone e poi tagliato zona per zona, così un percorso passa da una zona all'altra senza fermarsi al confine;
+- `difficolta.pmtiles`, sterrati e sentieri con il livello 1-5;
+- `curve.pmtiles`, le curve di livello ogni 20 m;
+- `quote.tar`, le quote a 90 m, un file `.hgt` per quadrato da 1°×1°;
+- `poi.json.gz`, i punti di interesse delle categorie di `PoiCatalog.kt`, con le stesse colonne della tabella POI dell'app. Le categorie sono riportate in `tools/poi_zone.py`: vanno cambiate insieme;
+- `zona.json`, il confine della zona, i segmenti BRouter che le servono (si scaricano da brouter.de) e per ogni file dimensione e sha256, così l'app riscarica solo i file cambiati.
+
+Ogni file arriva 5 km oltre il confine della zona. Il terreno non cambia, quindi curve e quote si copiano dall'edizione precedente finché `CONTOURS` nell'azione resta uguale.
+
+La release `zone-indice` contiene `indice.json`, l'elenco delle zone con l'ultima edizione di ognuna: l'app lo legge da `https://github.com/azoto77-code/offtrack-data/releases/download/zone-indice/indice.json` e i file della zona da `<base_url>/<tag>/<file>`.

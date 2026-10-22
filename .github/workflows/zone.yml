@@ -1,0 +1,333 @@
+name: Zone offline
+
+# Builds the offline zones of OffTrack, listed in zone/zone.json: for each zone one release zona-<id>-<edition> with
+# everything the app needs to work there without network, all from the same day's OpenStreetMap:
+#   valhalla.tar        routing tiles, cut from one build common to all zones, so routes cross from zone to zone
+#   difficolta.pmtiles  unpaved roads and paths with their level 1-5
+#   curve.pmtiles       contour lines every 20 m
+#   quote.tar           elevations at 90 m, one .hgt per square of 1x1 degree
+#   poi.json.gz         points of interest, as the app's poi table
+#   zona.json           size and sha256 of each file, outline, BRouter segments
+# and the release zone-indice with indice.json, the list the app reads. The terrain does not change: contours and
+# elevations are copied from the zone's last edition while CONTOURS stays the same.
+# Runs on the 4th of every month for all the zones; a pull request that changes it builds the zones of PR_ZONES and
+# keeps the files as artifacts.
+on:
+  schedule:
+    - cron: "0 3 4 * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/zone.yml"
+      - "zone/**"
+      - "tools/zone_*.py"
+      - "tools/poi_zone.py"
+      - "tools/dem_zone.py"
+      - "tools/valhalla_zone.py"
+      - "tools/test_poi_zone.py"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zone-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GEOFABRIK: "https://download.geofabrik.de/europe"
+  # The Valhalla version must read the tiles the same way as the one inside valhalla-mobile on the phone.
+  VALHALLA: "3.6.3"
+  # Average speeds measured per country, road class and density (OpenStreetMapSpeeds), as on the public FOSSGIS
+  # server: without them every road goes at its legal limit and the times come out a third too short.
+  SPEEDS: "https://raw.githubusercontent.com/OpenStreetMapSpeeds/schema/c9c6872d5ec656f5d290944b44eb1a103ed539fa/default_speeds.json"
+  # Change it when contours.py or dem_zone.py change: the next run traces contours and elevations again.
+  CONTOURS: "20m-1"
+  # The zones a pull request builds, keeping the files as artifacts and publishing nothing: "tutte" tries them all.
+  PR_ZONES: "nord-ovest"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      zones: ${{ steps.list.outputs.zones }}
+      sources: ${{ steps.list.outputs.sources }}
+      edition: ${{ steps.list.outputs.edition }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List the zones
+        id: list
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import datetime, json, os
+          doc = json.load(open("zone/zone.json"))
+          zones, sources = doc["zones"], doc["valhalla_sources"]
+          if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
+              if os.environ["PR_ZONES"] != "tutte":
+                  zones = [z for z in zones if z["id"] in os.environ["PR_ZONES"].split()]
+                  sources = [z["geofabrik"] for z in zones]
+          print("zones=" + json.dumps(zones))
+          print("sources=" + " ".join(sources))
+          print("edition=" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d"))
+          EOF
+          cat "$GITHUB_OUTPUT"
+
+  valhalla:
+    # One build for all the zones, cut zone by zone: built apart, two zones would not join and a route from Turin to
+    # Verona would stop at the border.
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make room on the disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Install the tools
+        run: |
+          sudo rm -f /var/lib/man-db/auto-update
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osmium-tool python3-shapely
+
+      - name: Download OpenStreetMap
+        run: |
+          mkdir -p work
+          for s in ${{ needs.prepare.outputs.sources }}; do
+            curl -fsSL --retry 3 -o "work/src-$(echo "$s" | tr / -).osm.pbf" "$GEOFABRIK/$s-latest.osm.pbf"
+          done
+          # Where two extracts overlap, along a border, each object is kept once.
+          osmium merge work/src-*.osm.pbf -o work/area.osm.pbf
+          rm work/src-*.osm.pbf
+          curl -fsSL --retry 3 -o work/default_speeds.json "${SPEEDS}"
+          ls -la work
+
+      - name: Build the tiles
+        run: |
+          docker run --rm --user root --entrypoint bash -v "$PWD/work:/data" "ghcr.io/valhalla/valhalla:${VALHALLA}" -c '
+            set -e
+            valhalla_build_config --mjolnir-tile-dir /data/tiles --mjolnir-admin /data/admins.sqlite \
+              --mjolnir-default-speeds-config /data/default_speeds.json --mjolnir-concurrency 4 > /data/valhalla.json
+            valhalla_build_admins -c /data/valhalla.json /data/area.osm.pbf
+            valhalla_build_tiles -c /data/valhalla.json /data/area.osm.pbf
+            chmod -R a+rwX /data/tiles'
+          rm work/area.osm.pbf
+          du -sh work/tiles
+
+      - name: Check the travel times
+        # Savona toll booth to Genova Pegli on the A10: about 50 minutes for Google and for FOSSGIS, 42 with these
+        # speeds in Valhalla 3.6.3. With legal limits it came out at 33: outside 38-58 the speeds did not go in.
+        run: |
+          docker run --rm --user root --entrypoint bash -v "$PWD/work:/data" "ghcr.io/valhalla/valhalla:${VALHALLA}" -c '
+            valhalla_service /data/valhalla.json route "{\"locations\":[{\"lat\":44.3270,\"lon\":8.4520},{\"lat\":44.4290,\"lon\":8.8150}],\"costing\":\"motorcycle\"}"' > work/check.json
+          python3 -c "
+          import json, sys
+          text = open('work/check.json').read()
+          # The service may print its log lines before the answer.
+          s = json.JSONDecoder().raw_decode(text[text.index('{\"trip\"'):])[0]['trip']['summary']
+          print('Savona-Pegli: %.1f km in %.0f min' % (s['length'], s['time'] / 60))
+          sys.exit(0 if 38 * 60 <= s['time'] <= 58 * 60 else 1)"
+
+      - name: Cut the zones
+        env:
+          ZONES: ${{ needs.prepare.outputs.zones }}
+        run: |
+          mkdir -p areas valhalla
+          echo "$ZONES" | python3 -c "import json, sys; [print(z['id'], z['geofabrik']) for z in json.load(sys.stdin)]" \
+            | while read -r id path; do
+                curl -fsSL --retry 3 -o "areas/$id.poly" "$GEOFABRIK/$path.poly"
+                python3 tools/valhalla_zone.py work/tiles "valhalla/$id.tar" "areas/$id.poly"
+              done
+
+      - name: Keep the zones for the next job
+        uses: actions/upload-artifact@v4
+        with:
+          name: valhalla-zone
+          path: valhalla/
+          retention-days: 2
+          compression-level: 1
+
+  zone:
+    needs: [prepare, valhalla]
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        zone: ${{ fromJSON(needs.prepare.outputs.zones) }}
+    env:
+      ID: ${{ matrix.zone.id }}
+      TAG: zona-${{ matrix.zone.id }}-${{ needs.prepare.outputs.edition }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make room on the disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Install the tools
+        run: |
+          sudo rm -f /var/lib/man-db/auto-update
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osmium-tool tippecanoe gdal-bin python3-pyosmium python3-numpy python3-scipy \
+            python3-shapely python3-pil
+
+      - name: Check the tools
+        working-directory: tools
+        run: python3 -m unittest test_poi_zone test_difficulty_layer -v
+
+      - name: Download OpenStreetMap
+        run: |
+          mkdir -p work areas out
+          curl -fsSL --retry 3 -o "areas/$ID.poly" "$GEOFABRIK/${{ matrix.zone.geofabrik }}.poly"
+          curl -fsSL --retry 3 -o work/zone.osm.pbf "$GEOFABRIK/${{ matrix.zone.geofabrik }}-latest.osm.pbf"
+          ls -la work
+
+      - name: Write the points of interest
+        # Only what can be a point of interest, plus the tracks for their gates: a small part of the file.
+        run: |
+          osmium tags-filter work/zone.osm.pbf \
+            nwr/amenity nwr/shop nwr/tourism nwr/man_made=water_tap nwr/natural=spring \
+            nwr/emergency=defibrillator nwr/mountain_pass=yes nwr/ford=yes \
+            n/barrier=gate n/highway=speed_camera w/highway=track \
+            -o work/poi.osm.pbf
+          python3 tools/poi_zone.py out/poi.json.gz "areas/$ID.poly" work/poi.osm.pbf \
+            ${{ !matrix.zone.cameras && '--no-cameras' || '' }}
+
+      - name: Build the difficulty map
+        # Tracks and unpaved roads from zoom 11, paths from 12 ("minz"); beyond 14 the app enlarges the last level.
+        run: |
+          osmium tags-filter work/zone.osm.pbf w/highway -o work/roads.osm.pbf
+          rm work/zone.osm.pbf work/poi.osm.pbf
+          python3 tools/difficulty_layer.py work/difficolta.geojsonseq work/roads.osm.pbf
+          tippecanoe -q -P -o out/difficolta.pmtiles -l difficolta \
+            -n "OffTrack difficoltà" -A "© OpenStreetMap contributors" \
+            -Z11 -z14 --no-feature-limit --no-tile-size-limit \
+            -j '{"*":["any",["==","minz",11],[">=","$zoom",12]]}' \
+            work/difficolta.geojsonseq
+          rm -r work
+
+      - name: Take the terrain from the last edition
+        id: terrain
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh release list --limit 100 --json tagName --jq '.[].tagName' | grep "^zona-$ID-" | sort -r | head -1)
+          if [ -n "$last" ] && gh release download "$last" -p zona.json -D prev \
+             && [ "$(jq -r .contours prev/zona.json)" = "$CONTOURS" ] \
+             && gh release download "$last" -p curve.pmtiles -p quote.tar -D out; then
+            echo "Curve e quote da $last"
+            echo "copied=true" >> "$GITHUB_OUTPUT"
+          fi
+          rm -rf prev
+
+      - name: Trace the contour lines
+        # Every 100 m from zoom 10, every 20 m from 12 ("minz"); beyond 12 the app enlarges it.
+        if: steps.terrain.outputs.copied != 'true'
+        run: |
+          python3 tools/contours.py curve.geojsonseq "areas/$ID.poly" --cache dem-cache --jobs 4
+          rm -rf dem-cache
+          tippecanoe -q -P -o out/curve.pmtiles -l curve \
+            -n "OffTrack curve di livello" -A "Terrain Tiles: SRTM, EU-DEM (Copernicus), Mapzen" \
+            -Z10 -z12 --no-feature-limit --no-tile-size-limit \
+            -j '{"*":["any",["==","minz",10],[">=","$zoom",12]]}' \
+            curve.geojsonseq
+          rm curve.geojsonseq
+
+      - name: Write the elevations
+        if: steps.terrain.outputs.copied != 'true'
+        run: python3 tools/dem_zone.py out/quote.tar "areas/$ID.poly"
+
+      - name: Take the routing tiles
+        uses: actions/download-artifact@v4
+        with:
+          name: valhalla-zone
+          path: valhalla
+
+      - name: Describe the zone
+        run: |
+          mv "valhalla/$ID.tar" out/valhalla.tar
+          rm -r valhalla
+          python3 tools/zone_index.py zone out zone/zone.json "$ID" "areas/$ID.poly" \
+            --edition "${{ needs.prepare.outputs.edition }}" --tag "$TAG" --valhalla "$VALHALLA" --contours "$CONTOURS"
+          ls -la out
+
+      - name: Keep the test files
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: zona-${{ matrix.zone.id }}
+          path: out/
+          retention-days: 14
+          compression-level: 1
+
+      - name: Publish the release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Never "latest": that one stays the Valhalla release the app reads today.
+        run: |
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" out/* --title "Zona ${{ matrix.zone.name }} ${{ needs.prepare.outputs.edition }}" \
+            --latest=false --notes "Zona offline ${{ matrix.zone.name }} di OffTrack. $(jq -r .attribution out/zona.json)"
+
+      - name: Keep the last two editions
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --limit 100 --json tagName --jq '.[].tagName' \
+            | grep "^zona-$ID-" | sort -r | tail -n +3 \
+            | xargs -r -I{} gh release delete {} --yes --cleanup-tag
+
+  index:
+    # The list the app reads: the newest edition of every zone, also when one of them failed this month.
+    needs: [prepare, valhalla, zone]
+    if: ${{ !cancelled() && needs.valhalla.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the tools
+        run: |
+          sudo rm -f /var/lib/man-db/auto-update
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-shapely
+
+      - name: Take the test zones
+        if: github.event_name == 'pull_request'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zona-*
+          path: zones
+
+      - name: Take the published zones
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tags=$(gh release list --limit 100 --json tagName --jq '.[].tagName')
+          for id in $(jq -r '.zones[].id' zone/zone.json); do
+            last=$(echo "$tags" | grep "^zona-$id-" | sort -r | head -1)
+            [ -n "$last" ] && gh release download "$last" -p zona.json -D "zones/$id"
+          done
+          ls -R zones
+
+      - name: Write the index
+        run: python3 tools/zone_index.py index indice.json zones/*/zona.json
+
+      - name: Publish the index
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # A release of its own that never changes name, so the app always finds the index at the same address.
+        run: |
+          gh release view zone-indice >/dev/null 2>&1 \
+            || gh release create zone-indice --title "Indice zone offline" --latest=false \
+                 --notes "Elenco delle zone offline di OffTrack: indice.json."
+          gh release upload zone-indice indice.json --clobber
