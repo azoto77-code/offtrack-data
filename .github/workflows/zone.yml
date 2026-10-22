@@ -10,7 +10,7 @@ name: Zone offline
 #   zona.json           size and sha256 of each file, outline, BRouter segments
 # and the release zone-indice with indice.json, the list the app reads. The terrain does not change: contours and
 # elevations are copied from the zone's last edition while CONTOURS stays the same.
-# Runs on the 4th of every month for all the zones; a pull request that changes it builds the north-west alone and
+# Runs on the 4th of every month for all the zones; a pull request that changes it builds the zones of PR_ZONES and
 # keeps the files as artifacts.
 on:
   schedule:
@@ -42,6 +42,8 @@ env:
   SPEEDS: "https://raw.githubusercontent.com/OpenStreetMapSpeeds/schema/c9c6872d5ec656f5d290944b44eb1a103ed539fa/default_speeds.json"
   # Change it when contours.py or dem_zone.py change: the next run traces contours and elevations again.
   CONTOURS: "20m-1"
+  # The zones a pull request builds, keeping the files as artifacts and publishing nothing: "tutte" tries them all.
+  PR_ZONES: "tutte"
 
 jobs:
   prepare:
@@ -61,8 +63,9 @@ jobs:
           doc = json.load(open("zone/zone.json"))
           zones, sources = doc["zones"], doc["valhalla_sources"]
           if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
-              zones = [z for z in zones if z["id"] == "nord-ovest"]
-              sources = [z["geofabrik"] for z in zones]
+              if os.environ["PR_ZONES"] != "tutte":
+                  zones = [z for z in zones if z["id"] in os.environ["PR_ZONES"].split()]
+                  sources = [z["geofabrik"] for z in zones]
           print("zones=" + json.dumps(zones))
           print("sources=" + " ".join(sources))
           print("edition=" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d"))
@@ -85,6 +88,7 @@ jobs:
 
       - name: Install the tools
         run: |
+          sudo rm -f /var/lib/man-db/auto-update
           sudo apt-get update -qq
           sudo apt-get install -y -qq osmium-tool python3-shapely
 
@@ -167,6 +171,7 @@ jobs:
 
       - name: Install the tools
         run: |
+          sudo rm -f /var/lib/man-db/auto-update
           sudo apt-get update -qq
           sudo apt-get install -y -qq osmium-tool tippecanoe gdal-bin python3-pyosmium python3-numpy python3-scipy \
             python3-shapely python3-pil
@@ -290,6 +295,7 @@ jobs:
 
       - name: Install the tools
         run: |
+          sudo rm -f /var/lib/man-db/auto-update
           sudo apt-get update -qq
           sudo apt-get install -y -qq python3-shapely
 
