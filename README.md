@@ -38,6 +38,7 @@ Ogni zona diventa la release `zona-<id>-<edizione>`, con tutti i dati presi lo s
 - `curve.pmtiles`, le curve di livello ogni 20 m;
 - `quote.tar`, le quote a 90 m, un file `.hgt` per quadrato da 1°×1°;
 - `poi.json.gz`, i punti di interesse delle categorie di `PoiCatalog.kt`, con le stesse colonne della tabella POI dell'app. Le categorie sono riportate in `tools/poi_zone.py`: vanno cambiate insieme;
+- `mappa.pmtiles`, la mappa Protomaps della zona fino a zoom 15, ritagliata dal file mondiale del giorno;
 - `zona.json`, il confine della zona, i segmenti BRouter che le servono (si scaricano da brouter.de) e per ogni file dimensione e sha256, così l'app riscarica solo i file cambiati.
 
 Ogni file arriva 5 km oltre il confine della zona. Il terreno non cambia, quindi curve e quote si copiano dall'edizione precedente finché `CONTOURS` nell'azione resta uguale.

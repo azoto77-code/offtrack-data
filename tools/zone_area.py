@@ -3,8 +3,10 @@
 zones take from it: the outline widened by a few kilometres, the 1x1 degree squares and the BRouter segments it
 touches, and a light outline for the app to draw.
 
-    zone_area.py AREA.poly    prints the box, the squares and the segments of the zone
+    zone_area.py AREA.poly [--geojson OUT]   prints the box, the squares and the segments of the zone; with
+                                             --geojson also writes the widened outline, for `pmtiles extract`
 """
+import json
 import math
 import sys
 from pathlib import Path
@@ -87,3 +89,6 @@ if __name__ == "__main__":
     print("riquadro", [round(x, 4) for x in w.bounds])
     print("quadrati", " ".join(squares(w)))
     print("segmenti BRouter", " ".join(segments(w)))
+    if "--geojson" in sys.argv:
+        out = sys.argv[sys.argv.index("--geojson") + 1]
+        Path(out).write_text(json.dumps({"type": "Feature", "properties": {}, "geometry": outline(w)}))
