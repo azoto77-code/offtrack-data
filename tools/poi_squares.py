@@ -91,6 +91,18 @@ def square_name(lat, lon):
     return f"{'N' if s >= 0 else 'S'}{abs(s):02d}{'E' if w >= 0 else 'W'}{abs(w):03d}"
 
 
+def extract_box(path):
+    """The box the extract covers, from its header (Geofabrik writes it); None when the file has none."""
+    reader = osmium.io.Reader(str(path))
+    try:
+        b = reader.header().box()
+        if not b.valid():
+            return None
+        return b.bottom_left.lat, b.bottom_left.lon, b.top_right.lat, b.top_right.lon
+    finally:
+        reader.close()
+
+
 def entry(prefix, osm_id, key, lat, lon, tags):
     kept = {k: tags[k] for k in KEPT if tags.get(k, "").strip()}
     name = tags.get("name", "").strip() or None
@@ -195,6 +207,13 @@ def main():
         h = Points(cameras=path.resolve() not in banned)
         h.apply_file(str(path), locations=True, idx="flex_mem")
         points = h.points()
+        # An extract carries whole ferry routes, so terminals as far as Tangier come along: only its own box counts.
+        box = extract_box(path)
+        if box:
+            outside = [k for k, e in points.items() if not (box[0] <= e[2] <= box[2] and box[1] <= e[3] <= box[3])]
+            for k in outside:
+                del points[k]
+            print(f"{path.name}: riquadro {box}, {len(outside)} punti fuori lasciati")
         print(f"{path.name}: {len(points)} punti")
         if h.too_wide:
             print(f"  lasciati fuori perché troppo estesi: {len(h.too_wide)} ({', '.join(h.too_wide[:10])})")
