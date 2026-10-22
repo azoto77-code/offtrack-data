@@ -1,7 +1,7 @@
 """Checks that the points of the offline zones are read as Overpass.kt reads them in the app."""
 import unittest
 
-from poi_squares import entry, kind_of, square_name
+from poi_squares import Points, entry, kind_of, square_name
 
 
 class KindsTest(unittest.TestCase):
@@ -29,6 +29,14 @@ class SquaresTest(unittest.TestCase):
     def test_only_the_card_tags_are_kept(self):
         e = entry("w", 22, "camp_site", 44.41, 8.41, {"name": " ", "opening_hours": "Mo-Su", "foo": "bar"})
         self.assertEqual(e, ["w22", "camp_site", 44.41, 8.41, None, {"opening_hours": "Mo-Su"}])
+
+
+    def test_a_place_wider_than_20_km_is_left_out(self):
+        h = Points(cameras=True)
+        self.assertTrue(h.fits("w1", (44.40, 8.40, 44.42, 8.42)))
+        self.assertFalse(h.fits("w2", (40.0, 8.0, 44.0, 8.1)))
+        self.assertFalse(h.fits("r3", None))
+        self.assertEqual(h.too_wide, ["w2"])
 
 
 if __name__ == "__main__":

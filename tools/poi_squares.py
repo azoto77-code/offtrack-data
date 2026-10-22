@@ -72,6 +72,10 @@ KEPT = [
 # Keys worth looking at: an element with none of them cannot be a point of interest.
 KEYS = {k for _, tags, _ in KINDS for k, _ in tags}
 
+# A way or relation wider than this, in degrees (about 20 km), is no point to ride to: a ferry line tagged as its
+# terminal, a broken outline. Its centre would fall far from anything, in the sea or in another country.
+MAX_SPAN = 0.2
+
 
 def kind_of(tags):
     """The first kind whose tags are all there, as Overpass.kt does; None when none matches."""
@@ -102,6 +106,7 @@ class Points(osmium.SimpleHandler):
         self.found = {}
         self.gates = {}
         self.track_nodes = set()
+        self.too_wide = []
 
     def node(self, n):
         tags = {t.k: t.v for t in n.tags}
@@ -132,7 +137,7 @@ class Points(osmium.SimpleHandler):
         if k is None or k[1] is not None:
             return
         box = self.box((r.location for r in w.nodes))
-        if box:
+        if self.fits(f"w{w.id}", box):
             self.found[f"w{w.id}"] = entry("w", w.id, k[0], (box[0] + box[2]) / 2, (box[1] + box[3]) / 2, tags)
 
     def area(self, a):
@@ -146,8 +151,8 @@ class Points(osmium.SimpleHandler):
         if k is None or k[1] is not None:
             return
         box = self.box((p.location for ring in a.outer_rings() for p in ring))
-        if box:
-            oid = a.orig_id()
+        oid = a.orig_id()
+        if self.fits(f"r{oid}", box):
             self.found[f"r{oid}"] = entry("r", oid, k[0], (box[0] + box[2]) / 2, (box[1] + box[3]) / 2, tags)
 
     @staticmethod
@@ -158,6 +163,15 @@ class Points(osmium.SimpleHandler):
             return None
         lats, lons = [p[0] for p in pts], [p[1] for p in pts]
         return min(lats), min(lons), max(lats), max(lons)
+
+    def fits(self, osm_id, box):
+        """True when the box is there and small enough to be one place; the others are counted to be reported."""
+        if box is None:
+            return False
+        if box[2] - box[0] > MAX_SPAN or box[3] - box[1] > MAX_SPAN:
+            self.too_wide.append(osm_id)
+            return False
+        return True
 
     def points(self):
         out = dict(self.found)
@@ -182,6 +196,8 @@ def main():
         h.apply_file(str(path), locations=True, idx="flex_mem")
         points = h.points()
         print(f"{path.name}: {len(points)} punti")
+        if h.too_wide:
+            print(f"  lasciati fuori perché troppo estesi: {len(h.too_wide)} ({', '.join(h.too_wide[:10])})")
         # A point in two extracts along a border is kept once.
         for e in points.values():
             squares.setdefault(square_name(e[2], e[3]), {})[e[0]] = e
