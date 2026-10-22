@@ -26,33 +26,14 @@ import numpy as np
 from PIL import Image
 from scipy.ndimage import gaussian_filter
 from shapely import box, clip_by_rect, prepare, union_all
-from shapely.geometry import LineString, MultiLineString, Polygon, mapping
+from shapely.geometry import LineString
+
+from zone_area import read_poly
 
 ZOOM = 12
 BLOCK = 16
 TILE = 256
 URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
-
-
-def read_poly(path):
-    """The area of an Osmosis .poly file (as Geofabrik publishes them); holes, marked with "!", are cut out."""
-    outer, holes, ring, hole = [], [], None, False
-    for line in Path(path).read_text().splitlines()[1:]:
-        s = line.strip()
-        if not s:
-            continue
-        if s == "END":
-            if ring is None:
-                break
-            (holes if hole else outer).append(Polygon(ring))
-            ring = None
-        elif ring is None:
-            ring, hole = [], s.startswith("!")
-        else:
-            lon, lat = s.split()[:2]
-            ring.append((float(lon), float(lat)))
-    area = union_all(outer)
-    return area.difference(union_all(holes)) if holes else area
 
 
 def tile_lon(x):

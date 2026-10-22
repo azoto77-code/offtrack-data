@@ -1,24 +1,28 @@
 #!/usr/bin/env python3
-"""Writes the points of interest of OffTrack's offline zones, one file per square of 1x1 degree.
+"""Writes the points of interest of one of OffTrack's offline zones, as one file.
 
 The kinds are those of PoiCatalog.kt in the app, matched the same way Overpass.kt reads an Overpass answer: the
 first kind whose tags are all on the element wins, ways and relations stand at the centre of their box, and only
 the tags the app keeps for the card are written. Gates count only where they close a dirt track, and speed cameras
 are left out of the countries where showing them is forbidden (the extracts given with --no-cameras).
 
-Each square is written as N44E008-poi.json.gz: {"name", "date", "count", "pois": [[id, kind, lat, lon, name, tags]]},
-with the same columns as the app's poi table, so the phone loads it as it is.
+Only the points inside the zone, widened by a few kilometres, are kept: an extract carries whole ferry routes, so
+terminals as far as Tangier come along. The file is poi.json.gz: {"zone", "date", "count", "pois": [[id, kind, lat,
+lon, name, tags]]}, with the same columns as the app's poi table, so the phone loads it as it is.
 
-    poi_squares.py OUT_DIR IN.osm.pbf [IN.osm.pbf ...] [--no-cameras IN.osm.pbf ...]
+    poi_zone.py OUT.json.gz AREA.poly IN.osm.pbf [--no-cameras]
 """
 import argparse
 import datetime
 import gzip
 import json
-import math
 from pathlib import Path
 
+import numpy as np
 import osmium
+from shapely import contains_xy, prepare
+
+from zone_area import read_poly, widen
 
 # PoiCatalog.kt, in its order: key, tags that must all be there (None = any value), special rule.
 KINDS = [
@@ -83,24 +87,6 @@ def kind_of(tags):
         if all(k in tags and (v is None or tags[k] == v) for k, v in need):
             return key, special
     return None
-
-
-def square_name(lat, lon):
-    """The square a point lies in, named by its south-west corner as the Valhalla packs are: N44E008."""
-    s, w = math.floor(lat), math.floor(lon)
-    return f"{'N' if s >= 0 else 'S'}{abs(s):02d}{'E' if w >= 0 else 'W'}{abs(w):03d}"
-
-
-def extract_box(path):
-    """The box the extract covers, from its header (Geofabrik writes it); None when the file has none."""
-    reader = osmium.io.Reader(str(path))
-    try:
-        b = reader.header().box()
-        if not b.valid():
-            return None
-        return b.bottom_left.lat, b.bottom_left.lon, b.top_right.lat, b.top_right.lon
-    finally:
-        reader.close()
 
 
 def entry(prefix, osm_id, key, lat, lon, tags):
@@ -193,41 +179,41 @@ class Points(osmium.SimpleHandler):
         return out
 
 
+def inside(points, area):
+    """The points of [points] (id -> row) that lie in [area]."""
+    prepare(area)
+    rows = list(points.values())
+    if not rows:
+        return {}
+    keep = contains_xy(area, np.array([e[3] for e in rows]), np.array([e[2] for e in rows]))
+    return {e[0]: e for e, k in zip(rows, keep) if k}
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("out", type=Path)
-    p.add_argument("inputs", nargs="+", type=Path)
-    p.add_argument("--no-cameras", nargs="*", type=Path, default=[], help="extracts where speed cameras are left out")
+    p.add_argument("area", type=Path)
+    p.add_argument("input", type=Path)
+    p.add_argument("--no-cameras", action="store_true", help="the zone is in a country where cameras may not be shown")
     a = p.parse_args()
-    a.out.mkdir(parents=True, exist_ok=True)
-    banned = {x.resolve() for x in a.no_cameras}
 
-    squares = {}
-    for path in a.inputs:
-        h = Points(cameras=path.resolve() not in banned)
-        h.apply_file(str(path), locations=True, idx="flex_mem")
-        points = h.points()
-        # An extract carries whole ferry routes, so terminals as far as Tangier come along: only its own box counts.
-        box = extract_box(path)
-        if box:
-            outside = [k for k, e in points.items() if not (box[0] <= e[2] <= box[2] and box[1] <= e[3] <= box[3])]
-            for k in outside:
-                del points[k]
-            print(f"{path.name}: riquadro {box}, {len(outside)} punti fuori lasciati")
-        print(f"{path.name}: {len(points)} punti")
-        if h.too_wide:
-            print(f"  lasciati fuori perché troppo estesi: {len(h.too_wide)} ({', '.join(h.too_wide[:10])})")
-        # A point in two extracts along a border is kept once.
-        for e in points.values():
-            squares.setdefault(square_name(e[2], e[3]), {})[e[0]] = e
+    h = Points(cameras=not a.no_cameras)
+    h.apply_file(str(a.input), locations=True, idx="flex_mem")
+    found = h.points()
+    points = inside(found, widen(read_poly(a.area)))
+    print(f"{a.input.name}: {len(points)} punti, {len(found) - len(points)} fuori dalla zona lasciati")
+    if h.too_wide:
+        print(f"  lasciati fuori perché troppo estesi: {len(h.too_wide)} ({', '.join(h.too_wide[:10])})")
+    counts = {}
+    for e in points.values():
+        counts[e[1]] = counts.get(e[1], 0) + 1
+    print("  " + ", ".join(f"{k} {counts[k]}" for k, _, _ in KINDS if k in counts))
 
-    day = datetime.date.today().isoformat()
-    for name, pois in sorted(squares.items()):
-        rows = sorted(pois.values(), key=lambda e: e[0])
-        doc = {"name": name, "date": day, "count": len(rows), "pois": rows}
-        with gzip.open(a.out / f"{name}-poi.json.gz", "wt", encoding="utf-8", compresslevel=9) as f:
-            json.dump(doc, f, ensure_ascii=False, separators=(",", ":"))
-        print(f"{name}: {len(rows)} punti")
+    rows = sorted(points.values(), key=lambda e: e[0])
+    doc = {"zone": a.area.stem, "date": datetime.date.today().isoformat(), "count": len(rows), "pois": rows}
+    a.out.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(a.out, "wt", encoding="utf-8", compresslevel=9) as f:
+        json.dump(doc, f, ensure_ascii=False, separators=(",", ":"))
 
 
 if __name__ == "__main__":

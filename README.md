@@ -29,9 +29,17 @@ Una pull request che cambia una delle due azioni costruisce solo il Nord-Ovest e
 
 ## Zone offline
 
-L'azione **Zone POI e quote** gira il 4 di ogni mese e prepara le due parti delle zone offline dell'app che non hanno un'altra fonte, un file per quadrato da 1°×1° (gli stessi quadrati dei pacchetti Valhalla):
+L'azione **Zone offline** gira il 4 di ogni mese e costruisce le zone che l'app scarica per funzionare senza rete (meteo escluso). Le zone sono elencate in `zone/zone.json`, una riga ciascuna con il suo estratto Geofabrik: per aggiungerne una basta una riga, e la volta dopo l'azione la costruisce.
 
-- `N44E008-poi.json.gz`, i punti di interesse delle categorie di `PoiCatalog.kt`, letti da Geofabrik per l'Italia e le zone francesi della mappa difficoltà, con le stesse colonne della tabella POI dell'app. Le categorie sono riportate in `tools/poi_squares.py`: vanno cambiate insieme;
-- `N44E008.hgt.gz`, le quote a 90 m (griglia SRTM da 1201×1201) prese dai Terrain Tiles su AWS, per il profilo delle tracce senza quote.
+Ogni zona diventa la release `zona-<id>-<edizione>`, con tutti i dati presi lo stesso giorno da OpenStreetMap:
 
-Il risultato è la release `zone-<area>-<data>` con il suo `index.json`, che elenca ogni quadrato con dimensione, sha256 e numero di punti.
+- `valhalla.tar`, i tile per il calcolo dei percorsi. Valhalla è costruito una volta sola per tutte le zone e poi tagliato zona per zona, così un percorso passa da una zona all'altra senza fermarsi al confine;
+- `difficolta.pmtiles`, sterrati e sentieri con il livello 1-5;
+- `curve.pmtiles`, le curve di livello ogni 20 m;
+- `quote.tar`, le quote a 90 m, un file `.hgt` per quadrato da 1°×1°;
+- `poi.json.gz`, i punti di interesse delle categorie di `PoiCatalog.kt`, con le stesse colonne della tabella POI dell'app. Le categorie sono riportate in `tools/poi_zone.py`: vanno cambiate insieme;
+- `zona.json`, il confine della zona, i segmenti BRouter che le servono (si scaricano da brouter.de) e per ogni file dimensione e sha256, così l'app riscarica solo i file cambiati.
+
+Ogni file arriva 5 km oltre il confine della zona. Il terreno non cambia, quindi curve e quote si copiano dall'edizione precedente finché `CONTOURS` nell'azione resta uguale.
+
+La release `zone-indice` contiene `indice.json`, l'elenco delle zone con l'ultima edizione di ognuna: l'app lo legge da `https://github.com/azoto77-code/offtrack-data/releases/download/zone-indice/indice.json` e i file della zona da `<base_url>/<tag>/<file>`.

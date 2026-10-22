@@ -1,0 +1,14 @@
+{
+  "comment": "The offline zones of OffTrack: one line per zone, with its extract on Geofabrik and whether speed cameras may be shown there. To add a zone, add a line: the next run of the Zone offline action builds it. The common Valhalla build reads the extracts of valhalla_sources, which must cover every zone.",
+  "valhalla_sources": ["italy", "france/provence-alpes-cote-d-azur", "france/rhone-alpes", "france/corse"],
+  "zones": [
+    {"id": "nord-ovest", "name": "Nord-Ovest", "country": "IT", "geofabrik": "italy/nord-ovest", "cameras": true},
+    {"id": "nord-est", "name": "Nord-Est", "country": "IT", "geofabrik": "italy/nord-est", "cameras": true},
+    {"id": "centro", "name": "Centro", "country": "IT", "geofabrik": "italy/centro", "cameras": true},
+    {"id": "sud", "name": "Sud", "country": "IT", "geofabrik": "italy/sud", "cameras": true},
+    {"id": "isole", "name": "Isole", "country": "IT", "geofabrik": "italy/isole", "cameras": true},
+    {"id": "provenza", "name": "Provenza", "country": "FR", "geofabrik": "france/provence-alpes-cote-d-azur", "cameras": false},
+    {"id": "rodano-alpi", "name": "Rodano-Alpi", "country": "FR", "geofabrik": "france/rhone-alpes", "cameras": false},
+    {"id": "corsica", "name": "Corsica", "country": "FR", "geofabrik": "france/corse", "cameras": false}
+  ]
+}
