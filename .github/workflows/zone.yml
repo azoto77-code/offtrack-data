@@ -43,7 +43,7 @@ env:
   # Change it when contours.py or dem_zone.py change: the next run traces contours and elevations again.
   CONTOURS: "20m-1"
   # The zones a pull request builds, keeping the files as artifacts and publishing nothing: "tutte" tries them all.
-  PR_ZONES: "tutte"
+  PR_ZONES: "nord-ovest"
 
 jobs:
   prepare:
