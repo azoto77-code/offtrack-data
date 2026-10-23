@@ -212,8 +212,10 @@ jobs:
           osmium tags-filter work/zone.osm.pbf nwr/name nwr/addr:housenumber -o work/search.osm.pbf
           osmium tags-filter work/zone.osm.pbf r/admin_level=8 -o work/comuni.osm.pbf
           shopt -s nullglob
+          # The BAN server is sometimes away: the zone is built all the same, with the house numbers of OSM alone.
           for d in $(echo "$ZONE" | jq -r '.ban // [] | .[]'); do
-            curl -fsSL --retry 3 -o "work/ban-$d.csv.gz" "$BAN/adresses-$d.csv.gz"
+            curl -fsSL --retry 5 --retry-delay 30 --retry-all-errors -o "work/ban-$d.csv.gz" "$BAN/adresses-$d.csv.gz" \
+              || { echo "::warning::BAN $d non scaricata: civici solo da OpenStreetMap"; rm -f "work/ban-$d.csv.gz"; }
           done
           ban=(work/ban-*.csv.gz)
           python3 tools/search_zone.py build work/ricerca.sqlite "areas/$ID.poly" work/search.osm.pbf \
