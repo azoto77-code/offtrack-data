@@ -35,7 +35,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GEOFABRIK: "https://download.geofabrik.de/europe"
+  GEOFABRIK: "https://download.geofabrik.de"
   # The Valhalla version must read the tiles the same way as the one inside valhalla-mobile on the phone.
   VALHALLA: "3.6.3"
   # Average speeds measured per country, road class and density (OpenStreetMapSpeeds), as on the public FOSSGIS
@@ -44,7 +44,7 @@ env:
   # Change it when contours.py or dem_zone.py change: the next run traces contours and elevations again.
   CONTOURS: "20m-1"
   # The zones a pull request builds, keeping the files as artifacts and publishing nothing: "tutte" tries them all.
-  PR_ZONES: "nord-ovest"
+  PR_ZONES: "oman"
 
 jobs:
   prepare:
@@ -66,9 +66,12 @@ jobs:
           if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
               if os.environ["PR_ZONES"] != "tutte":
                   zones = [z for z in zones if z["id"] in os.environ["PR_ZONES"].split()]
-                  sources = [z["geofabrik"] for z in zones]
+                  sources = [{k: z[k] for k in ("geofabrik", "boundary") if k in z} for z in zones]
+          # A source is an extract of Geofabrik, or one cut to the border of a relation (a country Geofabrik
+          # publishes only with its neighbours).
+          sources = [s if isinstance(s, dict) else {"geofabrik": s} for s in sources]
           print("zones=" + json.dumps(zones))
-          print("sources=" + " ".join(sources))
+          print("sources=" + json.dumps(sources))
           print("edition=" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d"))
           EOF
           cat "$GITHUB_OUTPUT"
@@ -94,11 +97,21 @@ jobs:
           sudo apt-get install -y -qq osmium-tool python3-shapely
 
       - name: Download OpenStreetMap
+        env:
+          SOURCES: ${{ needs.prepare.outputs.sources }}
         run: |
           mkdir -p work
-          for s in ${{ needs.prepare.outputs.sources }}; do
-            curl -fsSL --retry 3 -o "work/src-$(echo "$s" | tr / -).osm.pbf" "$GEOFABRIK/$s-latest.osm.pbf"
-          done
+          echo "$SOURCES" | python3 -c "import json, sys; [print(s['geofabrik'], s.get('boundary', 0)) for s in json.load(sys.stdin)]" \
+            | while read -r path rel; do
+                f="work/src-$(echo "$path" | tr / -).osm.pbf"
+                curl -fsSL --retry 3 -o "$f" "$GEOFABRIK/$path-latest.osm.pbf"
+                if [ "$rel" != 0 ]; then
+                  # Only the country inside the extract; its border also cuts the zone below.
+                  python3 tools/boundary_poly.py "$f" "$rel" "work/r$rel.poly"
+                  osmium extract -p "work/r$rel.poly" "$f" -o "work/cut.osm.pbf"
+                  mv work/cut.osm.pbf "$f"
+                fi
+              done
           # Where two extracts overlap, along a border, each object is kept once.
           osmium merge work/src-*.osm.pbf -o work/area.osm.pbf
           rm work/src-*.osm.pbf
@@ -120,6 +133,7 @@ jobs:
       - name: Check the travel times
         # Savona toll booth to Genova Pegli on the A10: about 50 minutes for Google and for FOSSGIS, 42 with these
         # speeds in Valhalla 3.6.3. With legal limits it came out at 33: outside 38-58 the speeds did not go in.
+        if: contains(needs.prepare.outputs.sources, 'europe/italy')
         run: |
           docker run --rm --user root --entrypoint bash -v "$PWD/work:/data" "ghcr.io/valhalla/valhalla:${VALHALLA}" -c '
             valhalla_service /data/valhalla.json route "{\"locations\":[{\"lat\":44.3270,\"lon\":8.4520},{\"lat\":44.4290,\"lon\":8.8150}],\"costing\":\"motorcycle\"}"' > work/check.json
@@ -136,9 +150,10 @@ jobs:
           ZONES: ${{ needs.prepare.outputs.zones }}
         run: |
           mkdir -p areas valhalla
-          echo "$ZONES" | python3 -c "import json, sys; [print(z['id'], z['geofabrik']) for z in json.load(sys.stdin)]" \
-            | while read -r id path; do
-                curl -fsSL --retry 3 -o "areas/$id.poly" "$GEOFABRIK/$path.poly"
+          echo "$ZONES" | python3 -c "import json, sys; [print(z['id'], z['geofabrik'], z.get('boundary', 0)) for z in json.load(sys.stdin)]" \
+            | while read -r id path rel; do
+                if [ "$rel" != 0 ]; then cp "work/r$rel.poly" "areas/$id.poly"
+                else curl -fsSL --retry 3 -o "areas/$id.poly" "$GEOFABRIK/$path.poly"; fi
                 python3 tools/valhalla_zone.py work/tiles "valhalla/$id.tar" "areas/$id.poly"
               done
 
@@ -161,6 +176,7 @@ jobs:
         zone: ${{ fromJSON(needs.prepare.outputs.zones) }}
     env:
       ID: ${{ matrix.zone.id }}
+      REL: ${{ matrix.zone.boundary || 0 }}
       TAG: zona-${{ matrix.zone.id }}-${{ needs.prepare.outputs.edition }}
     steps:
       - uses: actions/checkout@v4
@@ -184,8 +200,15 @@ jobs:
       - name: Download OpenStreetMap
         run: |
           mkdir -p work areas out
-          curl -fsSL --retry 3 -o "areas/$ID.poly" "$GEOFABRIK/${{ matrix.zone.geofabrik }}.poly"
           curl -fsSL --retry 3 -o work/zone.osm.pbf "$GEOFABRIK/${{ matrix.zone.geofabrik }}-latest.osm.pbf"
+          if [ "$REL" != 0 ]; then
+            # A country inside a larger extract: its border from the extract, and only what lies within.
+            python3 tools/boundary_poly.py work/zone.osm.pbf "$REL" "areas/$ID.poly"
+            osmium extract -p "areas/$ID.poly" work/zone.osm.pbf -o work/cut.osm.pbf
+            mv work/cut.osm.pbf work/zone.osm.pbf
+          else
+            curl -fsSL --retry 3 -o "areas/$ID.poly" "$GEOFABRIK/${{ matrix.zone.geofabrik }}.poly"
+          fi
           ls -la work
 
       - name: Write the points of interest
