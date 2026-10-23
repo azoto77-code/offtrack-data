@@ -7,6 +7,7 @@ name: Zone offline
 #   curve.pmtiles       contour lines every 20 m
 #   quote.tar           elevations at 90 m, one .hgt per square of 1x1 degree
 #   poi.json.gz         points of interest, as the app's poi table
+#   mappa.pmtiles       the Protomaps base map, cut from the day's world file down to zoom 15
 #   zona.json           size and sha256 of each file, outline, BRouter segments
 # and the release zone-indice with indice.json, the list the app reads. The terrain does not change: contours and
 # elevations are copied from the zone's last edition while CONTOURS stays the same.
@@ -210,6 +211,22 @@ jobs:
             -j '{"*":["any",["==","minz",11],[">=","$zoom",12]]}' \
             work/difficolta.geojsonseq
           rm -r work
+
+      - name: Cut the map
+        # The Protomaps world file of the day, read with range requests: only the zone's tiles come down.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo protomaps/go-pmtiles --pattern '*_Linux_x86_64.tar.gz' -D pmtiles-cli
+          tar -xzf pmtiles-cli/*.tar.gz -C pmtiles-cli
+          python3 tools/zone_area.py "areas/$ID.poly" --geojson area.geojson
+          for back in 0 1 2 3 4 5 6; do
+            url="https://build.protomaps.com/$(date -u -d "-$back day" +%Y%m%d).pmtiles"
+            curl -fsI "$url" > /dev/null && break
+          done
+          echo "Mappa da $url"
+          pmtiles-cli/pmtiles extract "$url" out/mappa.pmtiles --region=area.geojson --maxzoom=15 --download-threads=8
+          rm -r pmtiles-cli area.geojson
 
       - name: Take the terrain from the last edition
         id: terrain
