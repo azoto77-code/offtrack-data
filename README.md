@@ -31,6 +31,8 @@ Una pull request che cambia una delle due azioni costruisce solo il Nord-Ovest e
 
 L'azione **Zone offline** gira il 4 di ogni mese e costruisce le zone che l'app scarica per funzionare senza rete (meteo escluso). Le zone sono elencate in `zone/zone.json`, una riga ciascuna con il suo estratto Geofabrik: per aggiungerne una basta una riga, e la volta dopo l'azione la costruisce.
 
+Un paese che Geofabrik pubblica solo insieme ai vicini, come l'Oman dentro `asia/gcc-states`, prende l'estratto grande e `boundary`, l'id della relazione del suo confine su OpenStreetMap: l'azione ricava il confine dall'estratto con `tools/boundary_poly.py` e ritaglia lì. La stessa fonte, con lo stesso `boundary`, va anche in `valhalla_sources`.
+
 Ogni zona diventa la release `zona-<id>-<edizione>`, con tutti i dati presi lo stesso giorno da OpenStreetMap:
 
 - `valhalla.tar`, i tile per il calcolo dei percorsi. Valhalla è costruito una volta sola per tutte le zone e poi tagliato zona per zona, così un percorso passa da una zona all'altra senza fermarsi al confine;
