@@ -14,6 +14,8 @@ import datetime
 import gzip
 import hashlib
 import json
+import sqlite3
+import tempfile
 from pathlib import Path
 
 from zone_area import outline, read_poly, segments, squares, widen
@@ -22,6 +24,21 @@ GEOFABRIK = "https://download.geofabrik.de/europe"
 BASE_URL = "https://github.com/azoto77-code/offtrack-data/releases/download"
 ATTRIBUTION = ("Dati © OpenStreetMap contributors, licenza ODbL. Quote: Terrain Tiles su AWS (SRTM, EU-DEM prodotto "
                "con dati Copernicus, Mapzen).")
+BAN_ATTRIBUTION = " Indirizzi in Francia: Base Adresse Nationale, Licence Ouverte 2.0."
+
+
+def search_meta(path):
+    """The meta table of the compressed search index: counts and sources."""
+    with tempfile.NamedTemporaryFile(suffix=".sqlite") as tmp:
+        with gzip.open(path, "rb") as f:
+            while chunk := f.read(1 << 20):
+                tmp.write(chunk)
+        tmp.flush()
+        db = sqlite3.connect(tmp.name)
+        try:
+            return dict(db.execute("SELECT chiave, valore FROM meta"))
+        finally:
+            db.close()
 
 
 def describe(path):
@@ -60,6 +77,13 @@ def zone(a):
     if poi.exists():
         with gzip.open(poi, "rt", encoding="utf-8") as f:
             doc["poi_count"] = json.load(f)["count"]
+    search = Path(a.out) / "ricerca.sqlite.gz"
+    if search.exists():
+        meta = search_meta(search)
+        doc["search"] = {"version": int(meta["versione"]), "places": int(meta["luoghi"]),
+                         "numbers": int(meta["civici"])}
+        if "ban" in meta["fonti"].split(","):
+            doc["attribution"] += BAN_ATTRIBUTION
     (Path(a.out) / "zona.json").write_text(json.dumps(doc, ensure_ascii=False, separators=(",", ":")))
     print(f"{doc['name']}: {doc['bytes'] / 1e6:.0f} MB")
     for name, f in files.items():
