@@ -7,6 +7,7 @@ name: Zone offline
 #   curve.pmtiles       contour lines every 20 m
 #   quote.tar           elevations at 90 m, one .hgt per square of 1x1 degree
 #   poi.json.gz         points of interest, as the app's poi table
+#   ricerca.sqlite.gz   the search index: places, streets, house numbers (with the BAN in France), named points
 #   mappa.pmtiles       the Protomaps base map, cut from the day's world file down to zoom 15
 #   zona.json           size and sha256 of each file, outline, BRouter segments
 # and the release zone-indice with indice.json, the list the app reads. The terrain does not change: contours and
@@ -26,6 +27,8 @@ on:
       - "tools/dem_zone.py"
       - "tools/valhalla_zone.py"
       - "tools/test_poi_zone.py"
+      - "tools/search_zone.py"
+      - "tools/test_search_zone.py"
 
 permissions:
   contents: write
@@ -44,7 +47,9 @@ env:
   # Change it when contours.py or dem_zone.py change: the next run traces contours and elevations again.
   CONTOURS: "20m-1"
   # The zones a pull request builds, keeping the files as artifacts and publishing nothing: "tutte" tries them all.
-  PR_ZONES: "nord-ovest"
+  PR_ZONES: "nord-ovest corsica"
+  # The Base Adresse Nationale, one file per French department, for the house numbers of the French zones.
+  BAN: "https://adresse.data.gouv.fr/data/ban/adresses/latest/csv"
 
 jobs:
   prepare:
@@ -179,7 +184,7 @@ jobs:
 
       - name: Check the tools
         working-directory: tools
-        run: python3 -m unittest test_poi_zone test_difficulty_layer -v
+        run: python3 -m unittest test_poi_zone test_search_zone test_difficulty_layer -v
 
       - name: Download OpenStreetMap
         run: |
@@ -198,6 +203,25 @@ jobs:
             -o work/poi.osm.pbf
           python3 tools/poi_zone.py out/poi.json.gz "areas/$ID.poly" work/poi.osm.pbf \
             ${{ !matrix.zone.cameras && '--no-cameras' || '' }}
+
+      - name: Write the search index
+        # Everything with a name or a house number, and the municipal borders to tell where each one lies.
+        env:
+          ZONE: ${{ toJSON(matrix.zone) }}
+        run: |
+          osmium tags-filter work/zone.osm.pbf nwr/name nwr/addr:housenumber -o work/search.osm.pbf
+          osmium tags-filter work/zone.osm.pbf r/admin_level=8 -o work/comuni.osm.pbf
+          shopt -s nullglob
+          for d in $(echo "$ZONE" | jq -r '.ban // [] | .[]'); do
+            curl -fsSL --retry 3 -o "work/ban-$d.csv.gz" "$BAN/adresses-$d.csv.gz"
+          done
+          ban=(work/ban-*.csv.gz)
+          python3 tools/search_zone.py build work/ricerca.sqlite "areas/$ID.poly" work/search.osm.pbf \
+            work/comuni.osm.pbf ${ban:+--ban "${ban[@]}"} --gzip out/ricerca.sqlite.gz
+          echo "$ZONE" | jq -r '.prove // [] | .[]' | while IFS= read -r q; do
+            python3 tools/search_zone.py query work/ricerca.sqlite "$q"
+          done
+          rm -f work/search.osm.pbf work/comuni.osm.pbf work/ricerca.sqlite work/ban-*.csv.gz
 
       - name: Build the difficulty map
         # Tracks and unpaved roads from zoom 11, paths from 12 ("minz"); beyond 14 the app enlarges the last level.

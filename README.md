@@ -39,6 +39,7 @@ Ogni zona diventa la release `zona-<id>-<edizione>`, con tutti i dati presi lo s
 - `quote.tar`, le quote a 90 m, un file `.hgt` per quadrato da 1°×1°;
 - `poi.json.gz`, i punti di interesse delle categorie di `PoiCatalog.kt`, con le stesse colonne della tabella POI dell'app. Le categorie sono riportate in `tools/poi_zone.py`: vanno cambiate insieme;
 - `mappa.pmtiles`, la mappa Protomaps della zona fino a zoom 15, ritagliata dal file mondiale del giorno;
+- `ricerca.sqlite.gz`, l'indice per cercare una destinazione senza rete: località, vie per comune, civici e tutti i luoghi con un nome (hotel, ristoranti, rifugi, negozi, cime, passi, laghi). Il comune di ogni riga viene dai confini comunali di OpenStreetMap. Nelle zone francesi i civici vengono anche dalla Base Adresse Nationale, per i dipartimenti elencati in `ban` in `zone/zone.json`. Le parole sono normalizzate da `norm` in `tools/search_zone.py` (minuscole, senza accenti, solo lettere e cifre): l'app deve fare lo stesso con quello che si scrive. Le ricerche in `prove` finiscono nel log di ogni costruzione, per controllare l'indice a occhio;
 - `zona.json`, il confine della zona, i segmenti BRouter che le servono (si scaricano da brouter.de) e per ogni file dimensione e sha256, così l'app riscarica solo i file cambiati.
 
 Ogni file arriva 5 km oltre il confine della zona. Il terreno non cambia, quindi curve e quote si copiano dall'edizione precedente finché `CONTOURS` nell'azione resta uguale.
