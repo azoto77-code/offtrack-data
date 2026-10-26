@@ -67,7 +67,10 @@ NOT_STREETS = {"proposed", "construction", "abandoned", "platform", "bus_stop", 
 NODE_PLACES = {"city", "town", "village", "suburb", "hamlet"}
 
 # Other names a place is known by: Bolzano/Bozen, Aosta/Aoste, Nice/Nizza.
-OTHER_NAMES = ["alt_name", "name:it", "name:fr", "name:de", "official_name", "old_name", "short_name", "loc_name"]
+OTHER_NAMES = ["alt_name", "name:it", "name:fr", "name:de", "name:en", "int_name", "official_name", "old_name",
+               "short_name", "loc_name"]
+# Where the name has no letter the rider can type (مسقط), the first of these is the name shown and searched: Muscat.
+LATIN_NAMES = ["name:en", "int_name", "name:it", "name:fr", "name:de", "name:latin"]
 
 LETTERS = str.maketrans({"ß": "ss", "æ": "ae", "œ": "oe", "ø": "o", "ł": "l", "đ": "d", "ð": "d", "þ": "th"})
 
@@ -95,6 +98,8 @@ def e6(x):
 def names_of(tags):
     """The main name of an element and the other names it is known by, without repeats."""
     name = tags.get("name", "").strip()
+    if name and not norm(name):
+        name = next((v for v in (tags.get(k, "").split(";")[0].strip() for k in LATIN_NAMES) if norm(v)), name)
     others = []
     for k in OTHER_NAMES:
         for v in tags.get(k, "").split(";"):
@@ -155,7 +160,7 @@ class Municipalities(osmium.SimpleHandler):
         level = a.tags.get("admin_level")
         if a.tags.get("boundary") != "administrative" or level not in self.by_level:
             return
-        name = a.tags.get("name", "").strip()
+        name = names_of(a.tags)[0]
         if not name:
             return
         parts = []

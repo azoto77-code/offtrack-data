@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from search_zone import Municipalities, build, norm, norm_number, poi_kind, search
+from search_zone import Municipalities, build, names_of, norm, norm_number, poi_kind, search
 
 # A municipality of 0.1 x 0.1 degrees around Bardineto, with a village, two pieces of one street, a door on it, a
 # hotel, a hamlet numbered by its own name and a door just outside the zone.
@@ -67,6 +67,11 @@ class NormTest(unittest.TestCase):
         self.assertEqual(norm_number("12/A"), "12a")
         self.assertEqual(norm_number("12 a"), "12a")
         self.assertEqual(norm_number("4bis"), "4bis")
+
+    def test_a_name_in_another_script_is_shown_by_its_latin_one(self):
+        self.assertEqual(names_of({"name": "مسقط", "name:en": "Muscat", "name:it": "Mascate"}), ("Muscat", ["Mascate"]))
+        self.assertEqual(names_of({"name": "Torino", "name:en": "Turin"}), ("Torino", ["Turin"]))
+        self.assertEqual(names_of({"name": "مسقط"}), ("مسقط", []))
 
     def test_only_places_to_ride_to_are_points(self):
         self.assertEqual(poi_kind({"tourism": "hotel"}), "tourism=hotel")
