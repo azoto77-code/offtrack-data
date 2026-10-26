@@ -4,7 +4,7 @@
 What can be searched: the places (towns, villages, hamlets, localities), the streets of each municipality, the house
 numbers along them and every named point worth riding to (hotels, restaurants, huts, shops, peaks, passes, lakes...).
 Each place, street or point gets one row of `luogo`, with the municipality it lies in, worked out from the
-municipal borders (admin_level=8) of the same day's OpenStreetMap; its words go into the full-text table `testo`.
+municipal borders (admin_level=8, or the deepest level the zone has, see Municipalities) of the same day's OpenStreetMap; its words go into the full-text table `testo`.
 House numbers are not words to search: they wait in `civico` under their street and are matched once the street
 is found. In the French zones the house numbers come from the Base Adresse Nationale too, far more complete than
 OpenStreetMap there; a number both sources have is kept once, from the BAN.
@@ -67,7 +67,10 @@ NOT_STREETS = {"proposed", "construction", "abandoned", "platform", "bus_stop", 
 NODE_PLACES = {"city", "town", "village", "suburb", "hamlet"}
 
 # Other names a place is known by: Bolzano/Bozen, Aosta/Aoste, Nice/Nizza.
-OTHER_NAMES = ["alt_name", "name:it", "name:fr", "name:de", "official_name", "old_name", "short_name", "loc_name"]
+OTHER_NAMES = ["alt_name", "name:it", "name:fr", "name:de", "name:en", "int_name", "official_name", "old_name",
+               "short_name", "loc_name"]
+# Where the name has no letter the rider can type (مسقط), the first of these is the name shown and searched: Muscat.
+LATIN_NAMES = ["name:en", "int_name", "name:it", "name:fr", "name:de", "name:latin"]
 
 LETTERS = str.maketrans({"ß": "ss", "æ": "ae", "œ": "oe", "ø": "o", "ł": "l", "đ": "d", "ð": "d", "þ": "th"})
 
@@ -95,6 +98,8 @@ def e6(x):
 def names_of(tags):
     """The main name of an element and the other names it is known by, without repeats."""
     name = tags.get("name", "").strip()
+    if name and not norm(name):
+        name = next((v for v in (tags.get(k, "").split(";")[0].strip() for k in LATIN_NAMES) if norm(v)), name)
     others = []
     for k in OTHER_NAMES:
         for v in tags.get(k, "").split(";"):
@@ -129,16 +134,33 @@ def fits(box, kind):
 
 
 class Municipalities(osmium.SimpleHandler):
-    """The municipal borders of the zone, as (name, polygon)."""
+    """The municipal borders of the zone, as (name, polygon). Municipalities are admin_level=8 in Europe; a country
+    without them, as Oman with its wilayat at 6, gets the deepest level that covers it: [found] has one level only,
+    so a town is never named after a province where a municipality is missing."""
+
+    LEVELS = ("8", "7", "6")
+    # Fewer borders than this at a level are a stray few, not the country's municipalities.
+    ENOUGH = 10
 
     def __init__(self):
         super().__init__()
-        self.found = []
+        self.by_level = {level: [] for level in self.LEVELS}
+
+    @property
+    def level(self):
+        full = [lv for lv in self.LEVELS if len(self.by_level[lv]) >= self.ENOUGH]
+        some = [lv for lv in self.LEVELS if self.by_level[lv]]
+        return (full or some or self.LEVELS)[0]
+
+    @property
+    def found(self):
+        return self.by_level[self.level]
 
     def area(self, a):
-        if a.tags.get("boundary") != "administrative" or a.tags.get("admin_level") != "8":
+        level = a.tags.get("admin_level")
+        if a.tags.get("boundary") != "administrative" or level not in self.by_level:
             return
-        name = a.tags.get("name", "").strip()
+        name = names_of(a.tags)[0]
         if not name:
             return
         parts = []
@@ -149,7 +171,7 @@ class Municipalities(osmium.SimpleHandler):
                 parts.append(Polygon(shell, [h for h in holes if len(h) >= 4]))
         if parts:
             geom = unary_union(parts)
-            self.found.append((name, geom if geom.is_valid else geom.buffer(0)))
+            self.by_level[level].append((name, geom if geom.is_valid else geom.buffer(0)))
 
 
 class Things(osmium.SimpleHandler):
@@ -386,7 +408,7 @@ def build(a):
     borders = Municipalities()
     borders.apply_file(str(a.municipalities), locations=True, idx="flex_mem")
     where = Municipality(borders.found)
-    print(f"comuni: {len(borders.found)}")
+    print(f"comuni: {len(borders.found)} (admin_level={borders.level})")
 
     h = Things()
     h.apply_file(str(a.input), locations=True, idx="flex_mem")

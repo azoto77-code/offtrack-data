@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from search_zone import build, norm, norm_number, poi_kind, search
+from search_zone import Municipalities, build, names_of, norm, norm_number, poi_kind, search
 
 # A municipality of 0.1 x 0.1 degrees around Bardineto, with a village, two pieces of one street, a door on it, a
 # hotel, a hamlet numbered by its own name and a door just outside the zone.
@@ -68,11 +68,38 @@ class NormTest(unittest.TestCase):
         self.assertEqual(norm_number("12 a"), "12a")
         self.assertEqual(norm_number("4bis"), "4bis")
 
+    def test_a_name_in_another_script_is_shown_by_its_latin_one(self):
+        self.assertEqual(names_of({"name": "مسقط", "name:en": "Muscat", "name:it": "Mascate"}), ("Muscat", ["Mascate"]))
+        self.assertEqual(names_of({"name": "Torino", "name:en": "Turin"}), ("Torino", ["Turin"]))
+        self.assertEqual(names_of({"name": "مسقط"}), ("مسقط", []))
+
     def test_only_places_to_ride_to_are_points(self):
         self.assertEqual(poi_kind({"tourism": "hotel"}), "tourism=hotel")
         self.assertEqual(poi_kind({"natural": "peak"}), "natural=peak")
         self.assertIsNone(poi_kind({"natural": "tree"}))
         self.assertIsNone(poi_kind({"highway": "residential"}))
+
+
+class MunicipalitiesTest(unittest.TestCase):
+    def borders(self, **count):
+        m = Municipalities()
+        for level, n in count.items():
+            m.by_level[level[1:]] = [(f"{level}-{i}", None) for i in range(n)]
+        return m
+
+    def test_municipalities_where_the_zone_has_them(self):
+        m = self.borders(l8=300, l6=20)
+        self.assertEqual(m.level, "8")
+        self.assertEqual(len(m.found), 300)
+
+    def test_the_wilayat_where_there_are_no_municipalities(self):
+        # Oman: governorates at 4, wilayat at 6, a stray few at 8.
+        self.assertEqual(self.borders(l8=2, l6=61).level, "6")
+        self.assertEqual(self.borders(l6=61).level, "6")
+
+    def test_a_few_borders_are_better_than_none(self):
+        self.assertEqual(self.borders(l8=3).level, "8")
+        self.assertEqual(self.borders().found, [])
 
 
 class BuildTest(unittest.TestCase):
