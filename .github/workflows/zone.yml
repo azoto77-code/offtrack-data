@@ -210,7 +210,7 @@ jobs:
           ZONE: ${{ toJSON(matrix.zone) }}
         run: |
           osmium tags-filter work/zone.osm.pbf nwr/name nwr/addr:housenumber -o work/search.osm.pbf
-          osmium tags-filter work/zone.osm.pbf r/admin_level=8 -o work/comuni.osm.pbf
+          osmium tags-filter work/zone.osm.pbf r/admin_level=6,7,8 -o work/comuni.osm.pbf
           shopt -s nullglob
           # The BAN server is sometimes away: the zone is built all the same, with the house numbers of OSM alone.
           for d in $(echo "$ZONE" | jq -r '.ban // [] | .[]'); do
