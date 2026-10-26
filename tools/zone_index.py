@@ -20,7 +20,7 @@ from pathlib import Path
 
 from zone_area import outline, read_poly, segments, squares, widen
 
-GEOFABRIK = "https://download.geofabrik.de/europe"
+GEOFABRIK = "https://download.geofabrik.de"
 BASE_URL = "https://github.com/azoto77-code/offtrack-data/releases/download"
 ATTRIBUTION = ("Dati © OpenStreetMap contributors, licenza ODbL. Quote: Terrain Tiles su AWS (SRTM, EU-DEM prodotto "
                "con dati Copernicus, Mapzen).")
@@ -69,8 +69,8 @@ def zone(a):
         "contours": a.contours,
         "brouter": segments(wide),
         "squares": squares(wide),
-        "sources": [f"{GEOFABRIK}/{info['geofabrik']}-latest.osm.pbf"] + [
-            f"{GEOFABRIK}/{s}-latest.osm.pbf" for s in zones["valhalla_sources"]],
+        "sources": sorted({f"{GEOFABRIK}/{p}-latest.osm.pbf" for p in [info["geofabrik"]] + [
+            s if isinstance(s, str) else s["geofabrik"] for s in zones["valhalla_sources"]]}),
         "attribution": ATTRIBUTION,
     }
     poi = Path(a.out) / "poi.json.gz"
