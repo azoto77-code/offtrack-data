@@ -52,6 +52,8 @@ def describe(path):
 def zone(a):
     zones = json.loads(Path(a.zones).read_text())
     info = next(z for z in zones["zones"] if z["id"] == a.id)
+    # The Valhalla block the zone's routing tiles come from: zones of one block share one build and one edition.
+    block = next(b for b in zones["blocks"] if b["id"] == info["block"])
     area = read_poly(a.area)
     wide = widen(area)
     files = {f.name: describe(f) for f in sorted(Path(a.out).iterdir()) if f.is_file() and f.name != "zona.json"}
@@ -69,8 +71,9 @@ def zone(a):
         "contours": a.contours,
         "brouter": segments(wide),
         "squares": squares(wide),
+        "block": block["id"],
         "sources": sorted({f"{GEOFABRIK}/{p}-latest.osm.pbf" for p in [info["geofabrik"]] + [
-            s if isinstance(s, str) else s["geofabrik"] for s in zones["valhalla_sources"]]}),
+            s if isinstance(s, str) else s["geofabrik"] for s in block["sources"]]}),
         "attribution": ATTRIBUTION,
     }
     poi = Path(a.out) / "poi.json.gz"
