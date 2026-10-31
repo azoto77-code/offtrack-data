@@ -31,7 +31,7 @@ Una pull request che cambia una delle due azioni costruisce solo il Nord-Ovest e
 
 L'azione **Zone offline** gira il 4 di gennaio, aprile, luglio e ottobre e costruisce le zone che l'app scarica per funzionare senza rete (meteo escluso). Le zone sono elencate in `zone/zone.json`, una riga ciascuna con il suo estratto Geofabrik: per aggiungerne una basta una riga, e la volta dopo l'azione la costruisce.
 
-Un paese che Geofabrik pubblica solo insieme ai vicini, come l'Oman dentro `asia/gcc-states`, prende l'estratto grande e `boundary`, l'id della relazione del suo confine su OpenStreetMap: l'azione ricava il confine dall'estratto con `tools/boundary_poly.py` e ritaglia lì. La stessa fonte, con lo stesso `boundary`, va anche tra le `sources` del suo blocco.
+Le zone sono le regioni amministrative: le 20 italiane, le 13 francesi, le 17 comunità spagnole con le Canarie, il Portogallo e Andorra, più l'Oman. Una regione o un paese che Geofabrik non pubblica da solo, come il Piemonte dentro `europe/italy/nord-ovest` o l'Oman dentro `asia/gcc-states`, prende l'estratto grande e `boundary`, il suo codice ISO 3166-2 (`IT-21`, `FR-BRE`, `ES-CT`) oppure l'id della relazione del suo confine su OpenStreetMap: l'azione ricava il confine dall'estratto con `tools/boundary_poly.py`, scrive nel log il nome di quello che ha trovato e ritaglia lì. Per un paese tra le `sources` del suo blocco va la stessa fonte con lo stesso `boundary`. Le macro-aree di prima (Nord-Ovest, Nord-Est, Centro, Sud, Isole, Rodano-Alpi) restano finché l'app non porta i suoi utenti alle regioni.
 
 Ogni zona diventa la release `zona-<id>-<edizione>`, con tutti i dati presi lo stesso giorno da OpenStreetMap:
 
