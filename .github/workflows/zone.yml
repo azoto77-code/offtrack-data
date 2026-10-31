@@ -17,11 +17,21 @@ name: Zone offline
 # After the zones, the BRouter segments they need are copied into a release of the edition, and the elevations and
 # contour lines of every 1x1 degree square not yet published go into the terreno-<row> releases, shared by the zones.
 # Runs on the 4th of January, April, July and October for all the blocks and zones; a pull request that changes it
-# builds the blocks of PR_BLOCKS, cuts the zones of PR_ZONES among them and keeps the files as artifacts.
+# builds the blocks of PR_BLOCKS, cuts the zones of PR_ZONES among them and keeps the files as artifacts. Run by hand,
+# it can build some blocks and zones only, to redo what failed: the index keeps the last edition of the others.
 on:
   schedule:
     - cron: "0 3 4 1,4,7,10 *"
   workflow_dispatch:
+    inputs:
+      blocks:
+        description: "Blocks to build (ids separated by spaces), or tutti"
+        default: "tutti"
+        type: string
+      zones:
+        description: "Zones to cut among them (ids separated by spaces), or tutti"
+        default: "tutti"
+        type: string
   pull_request:
     paths:
       - ".github/workflows/zone.yml"
@@ -69,16 +79,23 @@ jobs:
 
       - name: List the zones
         id: list
+        env:
+          IN_BLOCKS: ${{ inputs.blocks }}
+          IN_ZONES: ${{ inputs.zones }}
         run: |
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
           import datetime, json, os
           doc = json.load(open("zone/zone.json"))
           zones, blocks = doc["zones"], doc["blocks"]
-          if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
-              if os.environ["PR_BLOCKS"] != "tutti":
-                  blocks = [b for b in blocks if b["id"] in os.environ["PR_BLOCKS"].split()]
-              if os.environ["PR_ZONES"] != "tutti":
-                  zones = [z for z in zones if z["id"] in os.environ["PR_ZONES"].split()]
+          # A pull request builds what PR_BLOCKS and PR_ZONES say; a run by hand what its inputs say.
+          wanted = {"pull_request": (os.environ["PR_BLOCKS"], os.environ["PR_ZONES"]),
+                    "workflow_dispatch": (os.environ["IN_BLOCKS"] or "tutti", os.environ["IN_ZONES"] or "tutti")}
+          if os.environ["GITHUB_EVENT_NAME"] in wanted:
+              want_blocks, want_zones = wanted[os.environ["GITHUB_EVENT_NAME"]]
+              if want_blocks != "tutti":
+                  blocks = [b for b in blocks if b["id"] in want_blocks.split()]
+              if want_zones != "tutti":
+                  zones = [z for z in zones if z["id"] in want_zones.split()]
               zones = [z for z in zones if z["block"] in {b["id"] for b in blocks}]
           # A source is an extract of Geofabrik, or one cut to the border of a relation (a country Geofabrik
           # publishes only with its neighbours).
@@ -191,6 +208,16 @@ jobs:
           ls -la valhalla
           date -u +"%H:%M zone tagliate per $BLOCK"
 
+      - name: Keep the borders for the next job
+        # Cut from the whole block, where every border is complete: the extract of one zone alone can cut off a
+        # piece of a border it shares with the next region (Emilia-Romagna, Lazio and Puglia, 31 October).
+        if: ${{ matrix.block.zones[0] }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aree-${{ matrix.block.id }}
+          path: areas/
+          retention-days: 2
+
       - name: Keep the zones for the next job
         if: ${{ matrix.block.zones[0] }}
         uses: actions/upload-artifact@v4
@@ -234,13 +261,21 @@ jobs:
         working-directory: tools
         run: python3 -m unittest test_poi_zone test_search_zone test_difficulty_layer -v
 
+      - name: Take the border of the zone
+        uses: actions/download-artifact@v4
+        with:
+          name: aree-${{ matrix.zone.block }}
+          path: areas
+
       - name: Download OpenStreetMap
         run: |
           mkdir -p work areas out
           curl -fsSL --retry 3 -o work/zone.osm.pbf "$GEOFABRIK/${{ matrix.zone.geofabrik }}-latest.osm.pbf"
           if [ "$REL" != 0 ]; then
-            # A country or a region inside a larger extract: its border from the extract, and only what lies within.
-            python3 tools/boundary_poly.py work/zone.osm.pbf "$REL" "areas/$ID.poly"
+            # A country or a region inside a larger extract: its border as the block job cut it from the whole
+            # block (from the extract itself when that is missing), and only what lies within.
+            [ -f "areas/$ID.poly" ] || python3 tools/boundary_poly.py work/zone.osm.pbf "$REL" "areas/$ID.poly"
+            head -1 "areas/$ID.poly"
             osmium extract -p "areas/$ID.poly" work/zone.osm.pbf -o work/cut.osm.pbf
             mv work/cut.osm.pbf work/zone.osm.pbf
           else
