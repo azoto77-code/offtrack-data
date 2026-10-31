@@ -51,7 +51,7 @@ env:
   # What a pull request builds, keeping the files as artifacts and publishing nothing: "tutti" tries them all. A zone
   # is cut only when its block is built.
   PR_BLOCKS: "italia-alpi"
-  PR_ZONES: "corsica"
+  PR_ZONES: "corsica liguria"
   # The Base Adresse Nationale, one file per French department, for the house numbers of the French zones.
   BAN: "https://adresse.data.gouv.fr/data/ban/adresses/latest/csv"
 
@@ -138,6 +138,8 @@ jobs:
           # Where two extracts overlap, along a border or Italy inside the Alps, each object is kept once.
           osmium merge work/src-*.osm.pbf -o work/area.osm.pbf
           rm work/src-*.osm.pbf
+          # The administrative borders alone, to cut the zones named by a region code below once the tiles are built.
+          osmium tags-filter work/area.osm.pbf r/boundary=administrative -o work/admin.osm.pbf
           curl -fsSL --retry 3 -o work/default_speeds.json "${SPEEDS}"
           ls -la work
           df -h / | tail -1
@@ -179,8 +181,9 @@ jobs:
           mkdir -p areas valhalla
           echo "$ZONES" | python3 -c "import json, sys; [print(z['id'], z['geofabrik'], z.get('boundary', 0)) for z in json.load(sys.stdin)]" \
             | while read -r id path rel; do
-                if [ "$rel" != 0 ]; then cp "work/r$rel.poly" "areas/$id.poly"
-                else curl -fsSL --retry 3 -o "areas/$id.poly" "$GEOFABRIK/$path.poly"; fi
+                if [ "$rel" = 0 ]; then curl -fsSL --retry 3 -o "areas/$id.poly" "$GEOFABRIK/$path.poly"
+                elif [ -f "work/r$rel.poly" ]; then cp "work/r$rel.poly" "areas/$id.poly"
+                else python3 tools/boundary_poly.py work/admin.osm.pbf "$rel" "areas/$id.poly"; fi
                 python3 tools/valhalla_zone.py work/tiles "valhalla/$id.tar" "areas/$id.poly"
               done
           ls -la valhalla
@@ -234,7 +237,7 @@ jobs:
           mkdir -p work areas out
           curl -fsSL --retry 3 -o work/zone.osm.pbf "$GEOFABRIK/${{ matrix.zone.geofabrik }}-latest.osm.pbf"
           if [ "$REL" != 0 ]; then
-            # A country inside a larger extract: its border from the extract, and only what lies within.
+            # A country or a region inside a larger extract: its border from the extract, and only what lies within.
             python3 tools/boundary_poly.py work/zone.osm.pbf "$REL" "areas/$ID.poly"
             osmium extract -p "areas/$ID.poly" work/zone.osm.pbf -o work/cut.osm.pbf
             mv work/cut.osm.pbf work/zone.osm.pbf
