@@ -29,17 +29,17 @@ Una pull request che cambia una delle due azioni costruisce solo il Nord-Ovest e
 
 ## Zone offline
 
-L'azione **Zone offline** gira il 4 di ogni mese e costruisce le zone che l'app scarica per funzionare senza rete (meteo escluso). Le zone sono elencate in `zone/zone.json`, una riga ciascuna con il suo estratto Geofabrik: per aggiungerne una basta una riga, e la volta dopo l'azione la costruisce.
+L'azione **Zone offline** gira il 4 di gennaio, aprile, luglio e ottobre e costruisce le zone che l'app scarica per funzionare senza rete (meteo escluso). Le zone sono elencate in `zone/zone.json`, una riga ciascuna con il suo estratto Geofabrik: per aggiungerne una basta una riga, e la volta dopo l'azione la costruisce.
 
-Un paese che Geofabrik pubblica solo insieme ai vicini, come l'Oman dentro `asia/gcc-states`, prende l'estratto grande e `boundary`, l'id della relazione del suo confine su OpenStreetMap: l'azione ricava il confine dall'estratto con `tools/boundary_poly.py` e ritaglia lì. La stessa fonte, con lo stesso `boundary`, va anche in `valhalla_sources`.
+Un paese che Geofabrik pubblica solo insieme ai vicini, come l'Oman dentro `asia/gcc-states`, prende l'estratto grande e `boundary`, l'id della relazione del suo confine su OpenStreetMap: l'azione ricava il confine dall'estratto con `tools/boundary_poly.py` e ritaglia lì. La stessa fonte, con lo stesso `boundary`, va anche tra le `sources` del suo blocco.
 
 Ogni zona diventa la release `zona-<id>-<edizione>`, con tutti i dati presi lo stesso giorno da OpenStreetMap:
 
-- `valhalla.tar`, i tile per il calcolo dei percorsi. Valhalla è costruito una volta sola per tutte le zone e poi tagliato zona per zona, così un percorso passa da una zona all'altra senza fermarsi al confine;
+- `valhalla.tar`, i tile per il calcolo dei percorsi. Valhalla è costruito una volta per **blocco** (`blocks` in `zone/zone.json`: Italia e Alpi, Penisola iberica, Francia, Oman) dagli estratti del blocco e poi tagliato zona per zona, così un percorso passa tra le zone dello stesso blocco senza fermarsi al confine; tra due blocchi si ferma. Ogni zona indica il suo `block`. Un blocco senza zone si costruisce solo in pull request, per misurarlo;
 - `difficolta.pmtiles`, sterrati e sentieri con il livello 1-5;
 - `curve.pmtiles`, le curve di livello ogni 20 m;
 - `quote.tar`, le quote a 90 m, un file `.hgt` per quadrato da 1°×1°;
-- `poi.json.gz`, i punti di interesse delle categorie di `PoiCatalog.kt`, con le stesse colonne della tabella POI dell'app. Le categorie sono riportate in `tools/poi_zone.py`: vanno cambiate insieme;
+- `poi.json.gz`, i punti di interesse delle categorie di `PoiCatalog.kt`, con le stesse colonne della tabella POI dell'app. Le categorie sono riportate in `tools/poi_zone.py`: vanno cambiate insieme. Gli autovelox ci sono in ogni zona: è l'app a lasciarli nascondere dove mostrarli è vietato;
 - `mappa.pmtiles`, la mappa Protomaps della zona fino a zoom 15, ritagliata dal file mondiale del giorno;
 - `ricerca.sqlite.gz`, l'indice per cercare una destinazione senza rete: località, vie per comune, civici e tutti i luoghi con un nome (hotel, ristoranti, rifugi, negozi, cime, passi, laghi). Il comune di ogni riga viene dai confini comunali di OpenStreetMap. Nelle zone francesi i civici vengono anche dalla Base Adresse Nationale, per i dipartimenti elencati in `ban` in `zone/zone.json`. Le parole sono normalizzate da `norm` in `tools/search_zone.py` (minuscole, senza accenti, solo lettere e cifre): l'app deve fare lo stesso con quello che si scrive. Le ricerche in `prove` finiscono nel log di ogni costruzione, per controllare l'indice a occhio;
 - `zona.json`, il confine della zona, i segmenti BRouter che le servono (si scaricano da brouter.de) e per ogni file dimensione e sha256, così l'app riscarica solo i file cambiati.

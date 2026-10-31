@@ -2,7 +2,7 @@ name: Zone offline
 
 # Builds the offline zones of OffTrack, listed in zone/zone.json: for each zone one release zona-<id>-<edition> with
 # everything the app needs to work there without network, all from the same day's OpenStreetMap:
-#   valhalla.tar        routing tiles, cut from one build common to all zones, so routes cross from zone to zone
+#   valhalla.tar        routing tiles, cut from the build of the zone's block, so routes cross between its zones
 #   difficolta.pmtiles  unpaved roads and paths with their level 1-5
 #   curve.pmtiles       contour lines every 20 m
 #   quote.tar           elevations at 90 m, one .hgt per square of 1x1 degree
@@ -12,11 +12,13 @@ name: Zone offline
 #   zona.json           size and sha256 of each file, outline, BRouter segments
 # and the release zone-indice with indice.json, the list the app reads. The terrain does not change: contours and
 # elevations are copied from the zone's last edition while CONTOURS stays the same.
-# Runs on the 4th of every month for all the zones; a pull request that changes it builds the zones of PR_ZONES and
-# keeps the files as artifacts.
+# Valhalla is built once per block of zone.json (Italy and the Alps, Iberia...): built apart, two zones would not join
+# and a route from Turin to Verona would stop at the border; one build of all Europe would not fit a runner.
+# Runs on the 4th of January, April, July and October for all the blocks and zones; a pull request that changes it builds the blocks of
+# PR_BLOCKS, cuts the zones of PR_ZONES among them and keeps the files as artifacts.
 on:
   schedule:
-    - cron: "0 3 4 * *"
+    - cron: "0 3 4 1,4,7,10 *"
   workflow_dispatch:
   pull_request:
     paths:
@@ -46,8 +48,10 @@ env:
   SPEEDS: "https://raw.githubusercontent.com/OpenStreetMapSpeeds/schema/c9c6872d5ec656f5d290944b44eb1a103ed539fa/default_speeds.json"
   # Change it when contours.py or dem_zone.py change: the next run traces contours and elevations again.
   CONTOURS: "20m-1"
-  # The zones a pull request builds, keeping the files as artifacts and publishing nothing: "tutte" tries them all.
-  PR_ZONES: "oman"
+  # What a pull request builds, keeping the files as artifacts and publishing nothing: "tutti" tries them all. A zone
+  # is cut only when its block is built.
+  PR_BLOCKS: "italia-alpi"
+  PR_ZONES: "corsica"
   # The Base Adresse Nationale, one file per French department, for the house numbers of the French zones.
   BAN: "https://adresse.data.gouv.fr/data/ban/adresses/latest/csv"
 
@@ -56,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       zones: ${{ steps.list.outputs.zones }}
-      sources: ${{ steps.list.outputs.sources }}
+      blocks: ${{ steps.list.outputs.blocks }}
       edition: ${{ steps.list.outputs.edition }}
     steps:
       - uses: actions/checkout@v4
@@ -67,26 +71,39 @@ jobs:
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
           import datetime, json, os
           doc = json.load(open("zone/zone.json"))
-          zones, sources = doc["zones"], doc["valhalla_sources"]
+          zones, blocks = doc["zones"], doc["blocks"]
           if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
-              if os.environ["PR_ZONES"] != "tutte":
+              if os.environ["PR_BLOCKS"] != "tutti":
+                  blocks = [b for b in blocks if b["id"] in os.environ["PR_BLOCKS"].split()]
+              if os.environ["PR_ZONES"] != "tutti":
                   zones = [z for z in zones if z["id"] in os.environ["PR_ZONES"].split()]
-                  sources = [{k: z[k] for k in ("geofabrik", "boundary") if k in z} for z in zones]
+              zones = [z for z in zones if z["block"] in {b["id"] for b in blocks}]
           # A source is an extract of Geofabrik, or one cut to the border of a relation (a country Geofabrik
           # publishes only with its neighbours).
-          sources = [s if isinstance(s, dict) else {"geofabrik": s} for s in sources]
+          for b in blocks:
+              b["sources"] = [s if isinstance(s, dict) else {"geofabrik": s} for s in b["sources"]]
+              b["zones"] = [z for z in zones if z["block"] == b["id"]]
+          # A block without zones is built only in a pull request, to measure it.
+          if os.environ["GITHUB_EVENT_NAME"] != "pull_request":
+              blocks = [b for b in blocks if b["zones"]]
           print("zones=" + json.dumps(zones))
-          print("sources=" + json.dumps(sources))
+          print("blocks=" + json.dumps(blocks))
           print("edition=" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d"))
           EOF
           cat "$GITHUB_OUTPUT"
 
   valhalla:
-    # One build for all the zones, cut zone by zone: built apart, two zones would not join and a route from Turin to
-    # Verona would stop at the border.
+    # One build per block, cut zone by zone. Each block is a job of its own: a failure stops only its zones.
     needs: prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        block: ${{ fromJSON(needs.prepare.outputs.blocks) }}
+    env:
+      BLOCK: ${{ matrix.block.id }}
     steps:
       - uses: actions/checkout@v4
 
@@ -103,9 +120,10 @@ jobs:
 
       - name: Download OpenStreetMap
         env:
-          SOURCES: ${{ needs.prepare.outputs.sources }}
+          SOURCES: ${{ toJSON(matrix.block.sources) }}
         run: |
           mkdir -p work
+          date -u +"%H:%M inizio blocco $BLOCK"
           echo "$SOURCES" | python3 -c "import json, sys; [print(s['geofabrik'], s.get('boundary', 0)) for s in json.load(sys.stdin)]" \
             | while read -r path rel; do
                 f="work/src-$(echo "$path" | tr / -).osm.pbf"
@@ -117,11 +135,13 @@ jobs:
                   mv work/cut.osm.pbf "$f"
                 fi
               done
-          # Where two extracts overlap, along a border, each object is kept once.
+          # Where two extracts overlap, along a border or Italy inside the Alps, each object is kept once.
           osmium merge work/src-*.osm.pbf -o work/area.osm.pbf
           rm work/src-*.osm.pbf
           curl -fsSL --retry 3 -o work/default_speeds.json "${SPEEDS}"
           ls -la work
+          df -h / | tail -1
+          date -u +"%H:%M estratti pronti"
 
       - name: Build the tiles
         run: |
@@ -132,13 +152,15 @@ jobs:
             valhalla_build_admins -c /data/valhalla.json /data/area.osm.pbf
             valhalla_build_tiles -c /data/valhalla.json /data/area.osm.pbf
             chmod -R a+rwX /data/tiles'
+          du -sh work/area.osm.pbf work/tiles
+          df -h / | tail -1
           rm work/area.osm.pbf
-          du -sh work/tiles
+          date -u +"%H:%M tile costruiti per $BLOCK"
 
       - name: Check the travel times
         # Savona toll booth to Genova Pegli on the A10: about 50 minutes for Google and for FOSSGIS, 42 with these
         # speeds in Valhalla 3.6.3. With legal limits it came out at 33: outside 38-58 the speeds did not go in.
-        if: contains(needs.prepare.outputs.sources, 'europe/italy')
+        if: contains(toJSON(matrix.block.sources), 'europe/italy')
         run: |
           docker run --rm --user root --entrypoint bash -v "$PWD/work:/data" "ghcr.io/valhalla/valhalla:${VALHALLA}" -c '
             valhalla_service /data/valhalla.json route "{\"locations\":[{\"lat\":44.3270,\"lon\":8.4520},{\"lat\":44.4290,\"lon\":8.8150}],\"costing\":\"motorcycle\"}"' > work/check.json
@@ -152,7 +174,7 @@ jobs:
 
       - name: Cut the zones
         env:
-          ZONES: ${{ needs.prepare.outputs.zones }}
+          ZONES: ${{ toJSON(matrix.block.zones) }}
         run: |
           mkdir -p areas valhalla
           echo "$ZONES" | python3 -c "import json, sys; [print(z['id'], z['geofabrik'], z.get('boundary', 0)) for z in json.load(sys.stdin)]" \
@@ -161,17 +183,22 @@ jobs:
                 else curl -fsSL --retry 3 -o "areas/$id.poly" "$GEOFABRIK/$path.poly"; fi
                 python3 tools/valhalla_zone.py work/tiles "valhalla/$id.tar" "areas/$id.poly"
               done
+          ls -la valhalla
+          date -u +"%H:%M zone tagliate per $BLOCK"
 
       - name: Keep the zones for the next job
+        if: ${{ matrix.block.zones[0] }}
         uses: actions/upload-artifact@v4
         with:
-          name: valhalla-zone
+          name: valhalla-${{ matrix.block.id }}
           path: valhalla/
           retention-days: 2
           compression-level: 1
 
   zone:
     needs: [prepare, valhalla]
+    # A block that failed takes only its zones with it: the others go on and the index keeps their last edition.
+    if: ${{ !cancelled() && needs.prepare.outputs.zones != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 300
     strategy:
@@ -224,8 +251,7 @@ jobs:
             nwr/emergency=defibrillator nwr/mountain_pass=yes nwr/ford=yes \
             n/barrier=gate n/highway=speed_camera w/highway=track \
             -o work/poi.osm.pbf
-          python3 tools/poi_zone.py out/poi.json.gz "areas/$ID.poly" work/poi.osm.pbf \
-            ${{ !matrix.zone.cameras && '--no-cameras' || '' }}
+          python3 tools/poi_zone.py out/poi.json.gz "areas/$ID.poly" work/poi.osm.pbf
 
       - name: Write the search index
         # Everything with a name or a house number, and the municipal borders to tell where each one lies.
@@ -312,7 +338,7 @@ jobs:
       - name: Take the routing tiles
         uses: actions/download-artifact@v4
         with:
-          name: valhalla-zone
+          name: valhalla-${{ matrix.zone.block }}
           path: valhalla
 
       - name: Describe the zone
@@ -354,7 +380,7 @@ jobs:
   index:
     # The list the app reads: the newest edition of every zone, also when one of them failed this month.
     needs: [prepare, valhalla, zone]
-    if: ${{ !cancelled() && needs.valhalla.result == 'success' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.zone.result != 'skipped' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

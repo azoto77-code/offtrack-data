@@ -50,7 +50,7 @@ class AreaTest(unittest.TestCase):
         self.assertEqual(e, ["w22", "camp_site", 44.41, 8.41, None, {"opening_hours": "Mo-Su"}])
 
     def test_a_place_wider_than_20_km_is_left_out(self):
-        h = Points(cameras=True)
+        h = Points()
         self.assertTrue(h.fits("w1", (44.40, 8.40, 44.42, 8.42)))
         self.assertFalse(h.fits("w2", (40.0, 8.0, 44.0, 8.1)))
         self.assertFalse(h.fits("r3", None))

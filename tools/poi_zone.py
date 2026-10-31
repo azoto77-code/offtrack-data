@@ -3,14 +3,14 @@
 
 The kinds are those of PoiCatalog.kt in the app, matched the same way Overpass.kt reads an Overpass answer: the
 first kind whose tags are all on the element wins, ways and relations stand at the centre of their box, and only
-the tags the app keeps for the card are written. Gates count only where they close a dirt track, and speed cameras
-are left out of the countries where showing them is forbidden (the extracts given with --no-cameras).
+the tags the app keeps for the card are written. Gates count only where they close a dirt track. Speed cameras are
+kept everywhere: the app lets the user hide them where showing them is forbidden.
 
 Only the points inside the zone, widened by a few kilometres, are kept: an extract carries whole ferry routes, so
 terminals as far as Tangier come along. The file is poi.json.gz: {"zone", "date", "count", "pois": [[id, kind, lat,
 lon, name, tags]]}, with the same columns as the app's poi table, so the phone loads it as it is.
 
-    poi_zone.py OUT.json.gz AREA.poly IN.osm.pbf [--no-cameras]
+    poi_zone.py OUT.json.gz AREA.poly IN.osm.pbf
 """
 import argparse
 import datetime
@@ -98,9 +98,8 @@ def entry(prefix, osm_id, key, lat, lon, tags):
 class Points(osmium.SimpleHandler):
     """Collects the points of one extract; gates wait until the tracks have been read."""
 
-    def __init__(self, cameras):
+    def __init__(self):
         super().__init__()
-        self.cameras = cameras
         self.found = {}
         self.gates = {}
         self.track_nodes = set()
@@ -114,8 +113,6 @@ class Points(osmium.SimpleHandler):
         if k is None or not n.location.valid():
             return
         key, special = k
-        if special == "speed_camera" and not self.cameras:
-            return
         e = entry("n", n.id, key, n.location.lat, n.location.lon, tags)
         if special == "track_gate":
             self.gates[n.id] = e
@@ -194,10 +191,9 @@ def main():
     p.add_argument("out", type=Path)
     p.add_argument("area", type=Path)
     p.add_argument("input", type=Path)
-    p.add_argument("--no-cameras", action="store_true", help="the zone is in a country where cameras may not be shown")
     a = p.parse_args()
 
-    h = Points(cameras=not a.no_cameras)
+    h = Points()
     h.apply_file(str(a.input), locations=True, idx="flex_mem")
     found = h.points()
     points = inside(found, widen(read_poly(a.area)))
