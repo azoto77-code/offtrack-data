@@ -7,7 +7,8 @@ joins the zona.json of every zone into indice.json, the list the app reads first
 
     zone_index.py zone OUT_DIR ZONES.json ID AREA.poly --edition 20261104 --tag zona-nord-ovest-20261104
                   --valhalla 3.6.3 --contours 20m-1
-    zone_index.py index OUT.json ZONA.json [ZONA.json ...] [--brouter-url URL] [--contours 20m-1]
+    zone_index.py index OUT.json ZONA.json [ZONA.json ...] [--brouter-url URL] [--brouter-have LIST] [--contours 20m-1]
+                  LIST names the segments the URL really serves, one a line: the others leave the zones' lists
     zone_index.py terrain OUT.json DIR --contours 20m-1 [--previous OLD.json]
                   the manifest of one row of the shared terrain: the squares in DIR added to those of OLD.json
 """
@@ -98,6 +99,15 @@ def zone(a):
 
 def index(a):
     zones = [json.loads(Path(p).read_text()) for p in a.zones]
+    # A zone's box widened by 20 km touches 5x5 degree squares that are open sea, and brouter.de has no segment
+    # for those: the list of what the server really has prunes them, or the app would ask for a file that is not there.
+    if a.brouter_have:
+        have = set(Path(a.brouter_have).read_text().split())
+        for z in zones:
+            missing = [s for s in z["brouter"] if s not in have]
+            if missing:
+                print(f"{z['id']}: senza i segmenti BRouter {', '.join(missing)}")
+                z["brouter"] = [s for s in z["brouter"] if s in have]
     doc = {
         "updated": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "base_url": BASE_URL,
@@ -147,6 +157,7 @@ def main():
     i.add_argument("out")
     i.add_argument("zones", nargs="+")
     i.add_argument("--brouter-url", default="https://brouter.de/brouter/segments4")
+    i.add_argument("--brouter-have")
     i.add_argument("--contours", default="")
     t = sub.add_parser("terrain")
     t.add_argument("out")
