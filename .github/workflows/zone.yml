@@ -454,13 +454,19 @@ jobs:
           echo "segments=$segments" >> "$GITHUB_OUTPUT"
 
       - name: Copy the segments
-        # In a pull request only the list above: the segments weigh gigabytes and brouter.de is not ours.
+        # In a pull request only the list above: the segments weigh gigabytes and brouter.de is not ours. A square
+        # of open sea has no segment on brouter.de (404): it is left out, and the index below leaves it out too.
         if: github.event_name != 'pull_request'
         run: |
           mkdir -p brouter
           for s in ${{ steps.list.outputs.segments }}; do
-            curl -fsSL --retry 5 --retry-delay 30 --retry-all-errors -o "brouter/$s.rd5" \
-              "https://brouter.de/brouter/segments4/$s.rd5"
+            code=$(curl -sSL --retry 5 --retry-delay 30 --retry-all-errors -o "brouter/$s.rd5" -w '%{http_code}' \
+              "https://brouter.de/brouter/segments4/$s.rd5")
+            case "$code" in
+              200) ;;
+              404) echo "$s: non esiste su brouter.de"; rm -f "brouter/$s.rd5" ;;
+              *) echo "$s: errore $code"; exit 1 ;;
+            esac
           done
           ls -la brouter
 
@@ -513,13 +519,24 @@ jobs:
           ls -R zones
 
       - name: Write the index
-        # The BRouter copy of this edition when it is there, brouter.de otherwise (and in a pull request).
+        # The BRouter copy of this edition when it is there, brouter.de otherwise (and in a pull request). Only the
+        # segments the server really has go in the list: a square of open sea has none.
         run: |
           url="https://brouter.de/brouter/segments4"
           if [ "${{ github.event_name }}" != pull_request ] && [ "${{ needs.brouter.result }}" = success ]; then
             url="https://github.com/${{ github.repository }}/releases/download/brouter-${{ needs.prepare.outputs.edition }}"
           fi
-          python3 tools/zone_index.py index indice.json zones/*/zona.json --brouter-url "$url" --contours "$CONTOURS"
+          : > segmenti.txt
+          for s in $(jq -rs '[.[].brouter[]] | unique | .[]' zones/*/zona.json); do
+            code=$(curl -sSIL --retry 5 --retry-delay 30 --retry-all-errors -o /dev/null -w '%{http_code}' "$url/$s.rd5")
+            case "$code" in
+              200) echo "$s" >> segmenti.txt ;;
+              404) echo "$s: non c'è" ;;
+              *) echo "$s: errore $code"; exit 1 ;;
+            esac
+          done
+          python3 tools/zone_index.py index indice.json zones/*/zona.json --brouter-url "$url" \
+            --brouter-have segmenti.txt --contours "$CONTOURS"
 
       - name: List the squares of terrain to build
         id: squares
