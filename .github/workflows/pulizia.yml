@@ -1,0 +1,34 @@
+name: Pulizia release
+
+# Deletes the releases named in the input, tags included, by hand from the Actions page. Used once to remove the
+# releases of the retired actions (valhalla-*, difficolta-*, curve-*) after the app of the regions replaced them,
+# and kept for the next time a release has to go without a laptop at hand.
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "Tags of the releases to delete, separated by spaces"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  pulizia:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Delete the releases
+        run: |
+          set -u
+          for tag in ${{ inputs.tags }}; do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release delete "$tag" --yes --cleanup-tag
+              echo "cancellata $tag"
+            else
+              echo "non trovata $tag"
+            fi
+          done
