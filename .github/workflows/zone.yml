@@ -14,11 +14,11 @@ name: Zone offline
 # elevations are copied from the zone's last edition while CONTOURS stays the same.
 # Valhalla is built once per block of zone.json (Italy and the Alps, Iberia...): built apart, two zones would not join
 # and a route from Turin to Verona would stop at the border; one build of all Europe would not fit a runner.
-# Runs on the 4th of every month for all the blocks and zones; a pull request that changes it builds the blocks of
+# Runs on the 4th of January, April, July and October for all the blocks and zones; a pull request that changes it builds the blocks of
 # PR_BLOCKS, cuts the zones of PR_ZONES among them and keeps the files as artifacts.
 on:
   schedule:
-    - cron: "0 3 4 * *"
+    - cron: "0 3 4 1,4,7,10 *"
   workflow_dispatch:
   pull_request:
     paths:
@@ -50,7 +50,7 @@ env:
   CONTOURS: "20m-1"
   # What a pull request builds, keeping the files as artifacts and publishing nothing: "tutti" tries them all. A zone
   # is cut only when its block is built.
-  PR_BLOCKS: "italia-alpi iberia francia"
+  PR_BLOCKS: "italia-alpi"
   PR_ZONES: "corsica"
   # The Base Adresse Nationale, one file per French department, for the house numbers of the French zones.
   BAN: "https://adresse.data.gouv.fr/data/ban/adresses/latest/csv"
@@ -251,8 +251,7 @@ jobs:
             nwr/emergency=defibrillator nwr/mountain_pass=yes nwr/ford=yes \
             n/barrier=gate n/highway=speed_camera w/highway=track \
             -o work/poi.osm.pbf
-          python3 tools/poi_zone.py out/poi.json.gz "areas/$ID.poly" work/poi.osm.pbf \
-            ${{ !matrix.zone.cameras && '--no-cameras' || '' }}
+          python3 tools/poi_zone.py out/poi.json.gz "areas/$ID.poly" work/poi.osm.pbf
 
       - name: Write the search index
         # Everything with a name or a house number, and the municipal borders to tell where each one lies.

@@ -1,5 +1,5 @@
 {
-  "comment": "The offline zones of OffTrack: one line per zone, with its extract on Geofabrik and whether speed cameras may be shown there. ban lists the French departments whose house numbers come from the Base Adresse Nationale; prove are searches printed in the log of every build, to check the search index by eye. To add a zone, add a line: the next run of the Zone offline action builds it. A country Geofabrik publishes only with its neighbours takes the larger extract and \"boundary\", the id of its border relation on OpenStreetMap: the action cuts the extract to it. Valhalla is built once per block, from the extracts in its sources (with the same boundary where there is one), and cut zone by zone: a route passes between zones of one block and stops at the border between two. Every zone names its block, whose sources must cover it.",
+  "comment": "The offline zones of OffTrack: one line per zone, with its extract on Geofabrik. Speed cameras are included everywhere: the app lets the user hide them. ban lists the French departments whose house numbers come from the Base Adresse Nationale; prove are searches printed in the log of every build, to check the search index by eye. To add a zone, add a line: the next run of the Zone offline action builds it. A country Geofabrik publishes only with its neighbours takes the larger extract and \"boundary\", the id of its border relation on OpenStreetMap: the action cuts the extract to it. Valhalla is built once per block, from the extracts in its sources (with the same boundary where there is one), and cut zone by zone: a route passes between zones of one block and stops at the border between two. Every zone names its block, whose sources must cover it.",
   "blocks": [
     {"id": "italia-alpi", "name": "Italia e Alpi",
      "sources": ["europe/italy", "europe/alps", "europe/france/provence-alpes-cote-d-azur", "europe/france/rhone-alpes", "europe/france/corse"]},
@@ -8,19 +8,19 @@
     {"id": "oman", "block": "oman", "name": "Oman", "sources": [{"geofabrik": "asia/gcc-states", "boundary": 305138}]}
   ],
   "zones": [
-    {"id": "nord-ovest", "block": "italia-alpi", "name": "Nord-Ovest", "country": "IT", "geofabrik": "europe/italy/nord-ovest", "cameras": true,
+    {"id": "nord-ovest", "block": "italia-alpi", "name": "Nord-Ovest", "country": "IT", "geofabrik": "europe/italy/nord-ovest",
      "prove": ["via roma 10 savona", "piazza castello torino", "corso buenos aires 33 milano", "via xx settembre 5 genova", "bardineto", "rifugio quintino sella", "colle dell agnello", "hotel savona"]},
-    {"id": "nord-est", "block": "italia-alpi", "name": "Nord-Est", "country": "IT", "geofabrik": "europe/italy/nord-est", "cameras": true},
-    {"id": "centro", "block": "italia-alpi", "name": "Centro", "country": "IT", "geofabrik": "europe/italy/centro", "cameras": true},
-    {"id": "sud", "block": "italia-alpi", "name": "Sud", "country": "IT", "geofabrik": "europe/italy/sud", "cameras": true},
-    {"id": "isole", "block": "italia-alpi", "name": "Isole", "country": "IT", "geofabrik": "europe/italy/isole", "cameras": true},
-    {"id": "provenza", "block": "italia-alpi", "name": "Provenza", "country": "FR", "geofabrik": "europe/france/provence-alpes-cote-d-azur", "cameras": false,
+    {"id": "nord-est", "block": "italia-alpi", "name": "Nord-Est", "country": "IT", "geofabrik": "europe/italy/nord-est"},
+    {"id": "centro", "block": "italia-alpi", "name": "Centro", "country": "IT", "geofabrik": "europe/italy/centro"},
+    {"id": "sud", "block": "italia-alpi", "name": "Sud", "country": "IT", "geofabrik": "europe/italy/sud"},
+    {"id": "isole", "block": "italia-alpi", "name": "Isole", "country": "IT", "geofabrik": "europe/italy/isole"},
+    {"id": "provenza", "block": "italia-alpi", "name": "Provenza", "country": "FR", "geofabrik": "europe/france/provence-alpes-cote-d-azur",
      "ban": ["04", "05", "06", "13", "83", "84"]},
-    {"id": "rodano-alpi", "block": "italia-alpi", "name": "Rodano-Alpi", "country": "FR", "geofabrik": "europe/france/rhone-alpes", "cameras": false,
+    {"id": "rodano-alpi", "block": "italia-alpi", "name": "Rodano-Alpi", "country": "FR", "geofabrik": "europe/france/rhone-alpes",
      "ban": ["01", "07", "26", "38", "42", "69", "73", "74"]},
-    {"id": "corsica", "block": "italia-alpi", "name": "Corsica", "country": "FR", "geofabrik": "europe/france/corse", "cameras": false,
+    {"id": "corsica", "block": "italia-alpi", "name": "Corsica", "country": "FR", "geofabrik": "europe/france/corse",
      "ban": ["2A", "2B"], "prove": ["cours napoleon 10 ajaccio", "col de bavella", "hotel calvi", "bonifacio"]},
-    {"id": "oman", "block": "oman", "name": "Oman", "country": "OM", "geofabrik": "asia/gcc-states", "boundary": 305138, "cameras": false,
+    {"id": "oman", "block": "oman", "name": "Oman", "country": "OM", "geofabrik": "asia/gcc-states", "boundary": 305138,
      "prove": ["muscat", "nizwa", "jebel shams", "salalah"]}
   ]
 }
