@@ -8,6 +8,7 @@ classic 3 arc second grid (1201x1201, big-endian 16-bit metres, -32768 where the
 profile of a track and the slope of a road, at a tenth of the size.
 
     dem_zone.py OUT.tar AREA.poly
+    dem_zone.py OUT.hgt.gz --square N44E008    one square alone, for the shared terrain release
 """
 import argparse
 import gzip
@@ -44,27 +45,40 @@ def fetch(name):
     raise err
 
 
+def hgt_gz(name):
+    """The 3 arc second .hgt of the square, gzipped, or None where the set has no file."""
+    grid = fetch(name)
+    if grid is None:
+        print(f"{name}: nessuna quota")
+        return None
+    small = np.ascontiguousarray(grid[::3, ::3]).astype(">i2")
+    valid = small[small != -32768]
+    top = int(valid.max()) if valid.size else 0
+    print(f"{name}: {small.shape[0]}x{small.shape[1]}, fino a {top} m")
+    # mtime 0, so the same elevations always give the same file and the app does not download them again.
+    return gzip.compress(small.tobytes(), compresslevel=9, mtime=0)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("out", type=Path)
-    p.add_argument("area", type=Path)
+    p.add_argument("area", type=Path, nargs="?")
+    p.add_argument("--square", help="one square alone, written as OUT")
     a = p.parse_args()
     a.out.parent.mkdir(parents=True, exist_ok=True)
+    if a.square:
+        data = hgt_gz(a.square)
+        if data is not None:
+            a.out.write_bytes(data)
+        return
     with tarfile.open(a.out, "w") as tar:
         for name in squares(widen(read_poly(a.area))):
-            grid = fetch(name)
-            if grid is None:
-                print(f"{name}: nessuna quota")
+            data = hgt_gz(name)
+            if data is None:
                 continue
-            small = np.ascontiguousarray(grid[::3, ::3]).astype(">i2")
-            # mtime 0, so the same elevations always give the same file and the app does not download them again.
-            data = gzip.compress(small.tobytes(), compresslevel=9, mtime=0)
             info = tarfile.TarInfo(f"{name}.hgt.gz")
             info.size = len(data)
             tar.addfile(info, io.BytesIO(data))
-            valid = small[small != -32768]
-            top = int(valid.max()) if valid.size else 0
-            print(f"{name}: {small.shape[0]}x{small.shape[1]}, fino a {top} m")
 
 
 if __name__ == "__main__":

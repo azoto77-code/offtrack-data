@@ -7,7 +7,9 @@ joins the zona.json of every zone into indice.json, the list the app reads first
 
     zone_index.py zone OUT_DIR ZONES.json ID AREA.poly --edition 20261104 --tag zona-nord-ovest-20261104
                   --valhalla 3.6.3 --contours 20m-1
-    zone_index.py index OUT.json ZONA.json [ZONA.json ...]
+    zone_index.py index OUT.json ZONA.json [ZONA.json ...] [--brouter-url URL] [--contours 20m-1]
+    zone_index.py terrain OUT.json DIR --contours 20m-1 [--previous OLD.json]
+                  the manifest of one row of the shared terrain: the squares in DIR added to those of OLD.json
 """
 import argparse
 import datetime
@@ -99,12 +101,34 @@ def index(a):
     doc = {
         "updated": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "base_url": BASE_URL,
-        "brouter_url": "https://brouter.de/brouter/segments4",
+        # The BRouter segments: the copy of this edition in a release of its own, or brouter.de when that failed.
+        "brouter_url": a.brouter_url,
+        # The shared terrain, one release a row of squares: <terrain_url>/terreno-N44/N44E008.hgt.gz and
+        # N44E008.curve.pmtiles, listed with their sizes in <terrain_url>/terreno-N44/terreno.json.
+        "terrain_url": BASE_URL,
+        "contours": a.contours,
         "zones": sorted(zones, key=lambda z: (z["country"] != "IT", z["country"], z["id"])),
     }
     Path(a.out).write_text(json.dumps(doc, ensure_ascii=False, separators=(",", ":")))
     for z in doc["zones"]:
         print(f"{z['id']}: {z['tag']}, {z['bytes'] / 1e6:.0f} MB")
+
+
+def terrain(a):
+    """The manifest of one row of the shared terrain. A square has "hgt" and "curve", each with size and sha256, or
+    null where the sea leaves nothing to publish; a square built this time replaces the one in the previous
+    manifest, the others stay."""
+    old = json.loads(Path(a.previous).read_text()) if a.previous and Path(a.previous).exists() else {}
+    squares = dict(old.get("squares", {})) if old.get("contours") == a.contours else {}
+    before = len(squares)
+    for name in sorted({f.name.split(".")[0] for f in Path(a.dir).iterdir() if f.name[0] in "NS" and "." in f.name}):
+        hgt = Path(a.dir, f"{name}.hgt.gz")
+        curve = Path(a.dir, f"{name}.curve.pmtiles")
+        squares[name] = {"hgt": describe(hgt) if hgt.exists() else None,
+                         "curve": describe(curve) if curve.exists() else None}
+    doc = {"contours": a.contours, "attribution": ATTRIBUTION, "squares": dict(sorted(squares.items()))}
+    Path(a.out).write_text(json.dumps(doc, separators=(",", ":")))
+    print(f"{len(doc['squares'])} quadrati nel manifesto, {len(squares) - before} nuovi")
 
 
 def main():
@@ -122,8 +146,15 @@ def main():
     i = sub.add_parser("index")
     i.add_argument("out")
     i.add_argument("zones", nargs="+")
+    i.add_argument("--brouter-url", default="https://brouter.de/brouter/segments4")
+    i.add_argument("--contours", default="")
+    t = sub.add_parser("terrain")
+    t.add_argument("out")
+    t.add_argument("dir")
+    t.add_argument("--contours", required=True)
+    t.add_argument("--previous")
     a = p.parse_args()
-    zone(a) if a.cmd == "zone" else index(a)
+    {"zone": zone, "index": index, "terrain": terrain}[a.cmd](a)
 
 
 if __name__ == "__main__":

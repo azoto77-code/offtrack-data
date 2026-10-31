@@ -14,8 +14,10 @@ name: Zone offline
 # elevations are copied from the zone's last edition while CONTOURS stays the same.
 # Valhalla is built once per block of zone.json (Italy and the Alps, Iberia...): built apart, two zones would not join
 # and a route from Turin to Verona would stop at the border; one build of all Europe would not fit a runner.
-# Runs on the 4th of January, April, July and October for all the blocks and zones; a pull request that changes it builds the blocks of
-# PR_BLOCKS, cuts the zones of PR_ZONES among them and keeps the files as artifacts.
+# After the zones, the BRouter segments they need are copied into a release of the edition, and the elevations and
+# contour lines of every 1x1 degree square not yet published go into the terreno-<row> releases, shared by the zones.
+# Runs on the 4th of January, April, July and October for all the blocks and zones; a pull request that changes it
+# builds the blocks of PR_BLOCKS, cuts the zones of PR_ZONES among them and keeps the files as artifacts.
 on:
   schedule:
     - cron: "0 3 4 1,4,7,10 *"
@@ -380,11 +382,73 @@ jobs:
             | grep "^zona-$ID-" | sort -r | tail -n +3 \
             | xargs -r -I{} gh release delete {} --yes --cleanup-tag
 
-  index:
-    # The list the app reads: the newest edition of every zone, also when one of them failed this month.
-    needs: [prepare, valhalla, zone]
+  brouter:
+    # The BRouter segments the zones need, copied from brouter.de into a release of this edition: the app takes
+    # them from there, with the same date as the rest, and does not depend on brouter.de being up.
+    needs: [prepare, zone]
     if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.zone.result != 'skipped' }}
     runs-on: ubuntu-latest
+    env:
+      TAG: brouter-${{ needs.prepare.outputs.edition }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Take the test zones
+        if: github.event_name == 'pull_request'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zona-*
+          path: zones
+
+      - name: Take the published zones
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tags=$(gh release list --limit 300 --json tagName --jq '.[].tagName')
+          for id in $(jq -r '.zones[].id' zone/zone.json); do
+            last=$(echo "$tags" | grep "^zona-$id-" | sort -r | head -1)
+            [ -n "$last" ] && gh release download "$last" -p zona.json -D "zones/$id"
+          done
+
+      - name: List the segments
+        id: list
+        run: |
+          segments=$(jq -rs '[.[].brouter[]] | unique | .[]' zones/*/zona.json | tr '\n' ' ')
+          echo "Segmenti: $segments"
+          echo "segments=$segments" >> "$GITHUB_OUTPUT"
+
+      - name: Copy the segments
+        # In a pull request only the list above: the segments weigh gigabytes and brouter.de is not ours.
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p brouter
+          for s in ${{ steps.list.outputs.segments }}; do
+            curl -fsSL --retry 5 --retry-delay 30 --retry-all-errors -o "brouter/$s.rd5" \
+              "https://brouter.de/brouter/segments4/$s.rd5"
+          done
+          ls -la brouter
+
+      - name: Publish the release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" brouter/* --title "Segmenti BRouter ${{ needs.prepare.outputs.edition }}" \
+            --latest=false --notes "Segmenti BRouter delle zone offline di OffTrack, copiati da brouter.de (segments4)."
+          gh release list --limit 300 --json tagName --jq '.[].tagName' \
+            | grep "^brouter-" | sort -r | tail -n +3 \
+            | xargs -r -I{} gh release delete {} --yes --cleanup-tag
+
+  index:
+    # The list the app reads: the newest edition of every zone, also when one of them failed this month. It also
+    # lists the squares of shared terrain still to build, for the terreno job below.
+    needs: [prepare, valhalla, zone, brouter]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.zone.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    outputs:
+      bands: ${{ steps.squares.outputs.bands }}
     steps:
       - uses: actions/checkout@v4
 
@@ -414,7 +478,41 @@ jobs:
           ls -R zones
 
       - name: Write the index
-        run: python3 tools/zone_index.py index indice.json zones/*/zona.json
+        # The BRouter copy of this edition when it is there, brouter.de otherwise (and in a pull request).
+        run: |
+          url="https://brouter.de/brouter/segments4"
+          if [ "${{ github.event_name }}" != pull_request ] && [ "${{ needs.brouter.result }}" = success ]; then
+            url="https://github.com/${{ github.repository }}/releases/download/brouter-${{ needs.prepare.outputs.edition }}"
+          fi
+          python3 tools/zone_index.py index indice.json zones/*/zona.json --brouter-url "$url" --contours "$CONTOURS"
+
+      - name: List the squares of terrain to build
+        id: squares
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # The squares of all the zones, less those a terreno-<row> release already has with these contours. In a
+        # pull request every square of the test zones is built, as test files.
+        run: |
+          mkdir -p terreno
+          for band in $(jq -rs '[.[].squares[][0:3]] | unique | .[]' zones/*/zona.json); do
+            [ "${{ github.event_name }}" = pull_request ] \
+              || gh release download "terreno-$band" -p terreno.json -D "terreno/$band" 2>/dev/null || true
+          done
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import glob, json, os
+          need = sorted({s for p in glob.glob("zones/*/zona.json") for s in json.load(open(p))["squares"]})
+          bands = {}
+          for name in need:
+              band = name[:3]
+              path = f"terreno/{band}/terreno.json"
+              have = json.load(open(path)) if os.path.exists(path) else {}
+              done = have.get("squares", {}) if have.get("contours") == os.environ["CONTOURS"] else {}
+              if name not in done:
+                  bands.setdefault(band, []).append(name)
+          print("bands=" + json.dumps([{"band": b, "squares": q} for b, q in sorted(bands.items())]))
+          print(f"{sum(len(q) for q in bands.values())} quadrati da costruire in {len(bands)} file", file=__import__("sys").stderr)
+          EOF
+          cat "$GITHUB_OUTPUT"
 
       - name: Publish the index
         if: github.event_name != 'pull_request'
@@ -426,3 +524,77 @@ jobs:
             || gh release create zone-indice --title "Indice zone offline" --latest=false \
                  --notes "Elenco delle zone offline di OffTrack: indice.json."
           gh release upload zone-indice indice.json --clobber
+
+  terreno:
+    # The shared terrain: elevations and contour lines of every 1x1 degree square the zones touch, one release a
+    # row of squares (terreno-N44), built once and kept, since the ground does not change. Curve e quote inside the
+    # zones stay until the app reads these.
+    needs: [prepare, index]
+    if: ${{ !cancelled() && needs.index.result == 'success' && needs.index.outputs.bands != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        row: ${{ fromJSON(needs.index.outputs.bands) }}
+    env:
+      BAND: ${{ matrix.row.band }}
+      TAG: terreno-${{ matrix.row.band }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the tools
+        run: |
+          sudo rm -f /var/lib/man-db/auto-update
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq tippecanoe gdal-bin python3-numpy python3-scipy python3-shapely python3-pil
+
+      - name: Build the squares
+        env:
+          SQUARES: ${{ join(matrix.row.squares, ' ') }}
+        run: |
+          mkdir -p out work
+          for name in $SQUARES; do
+            python3 tools/zone_area.py --square "$name" "work/$name.poly"
+            python3 tools/contours.py work/curve.geojsonseq "work/$name.poly" --cache dem-cache --jobs 4
+            if [ -s work/curve.geojsonseq ]; then
+              tippecanoe -q -P -o "out/$name.curve.pmtiles" -l curve \
+                -n "OffTrack curve di livello $name" -A "Terrain Tiles: SRTM, EU-DEM (Copernicus), Mapzen" \
+                -Z10 -z12 --no-feature-limit --no-tile-size-limit \
+                -j '{"*":["any",["==","minz",10],[">=","$zoom",12]]}' \
+                work/curve.geojsonseq
+            fi
+            rm -f work/curve.geojsonseq
+            python3 tools/dem_zone.py "out/$name.hgt.gz" --square "$name"
+          done
+          rm -rf dem-cache work
+          ls -la out
+
+      - name: Write the manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ "${{ github.event_name }}" = pull_request ] \
+            || gh release download "$TAG" -p terreno.json -D prev 2>/dev/null || true
+          python3 tools/zone_index.py terrain out/terreno.json out --contours "$CONTOURS" --previous prev/terreno.json
+
+      - name: Keep the test files
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terreno-${{ matrix.row.band }}
+          path: out/
+          retention-days: 14
+          compression-level: 1
+
+      - name: Publish the squares
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --title "Terreno $BAND" --latest=false \
+                 --notes "Quote e curve di livello dei quadrati di 1°×1° della fascia $BAND, per le zone offline di OffTrack. Terrain Tiles: SRTM, EU-DEM (Copernicus), Mapzen."
+          gh release upload "$TAG" out/* --clobber
+
