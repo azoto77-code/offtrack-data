@@ -5,6 +5,7 @@ touches, and a light outline for the app to draw.
 
     zone_area.py AREA.poly [--geojson OUT]   prints the box, the squares and the segments of the zone; with
                                              --geojson also writes the widened outline, for `pmtiles extract`
+    zone_area.py --square N44E008 OUT.poly   writes the 1x1 degree square as a .poly, for the shared terrain
 """
 import json
 import math
@@ -53,6 +54,30 @@ def square_name(lat, lon):
     return f"{'N' if s >= 0 else 'S'}{abs(s):02d}{'E' if w >= 0 else 'W'}{abs(w):03d}"
 
 
+def square_box(name):
+    """The 1x1 degree square of a name like N44E008, as a shapely box."""
+    s = int(name[1:3]) * (1 if name[0] == "N" else -1)
+    w = int(name[4:7]) * (1 if name[3] == "E" else -1)
+    return box(w, s, w + 1, s + 1)
+
+
+def band(name):
+    """The row of squares a square belongs to, N44 for N44E008: the shared terrain is published one release a row."""
+    return name[:3]
+
+
+def write_poly(area, path, name):
+    """[area] as an Osmosis .poly file: one ring per polygon."""
+    polygons = list(area.geoms) if hasattr(area, "geoms") else [area]
+    lines = [name]
+    for n, poly in enumerate(polygons, 1):
+        lines.append(str(n))
+        lines += [f"   {x:.6f} {y:.6f}" for x, y in poly.exterior.coords]
+        lines.append("END")
+    lines.append("END")
+    Path(path).write_text("\n".join(lines) + "\n")
+
+
 def squares(area):
     """The names of the 1x1 degree squares that touch [area]."""
     prepare(area)
@@ -84,6 +109,9 @@ def outline(area):
 
 
 if __name__ == "__main__":
+    if sys.argv[1] == "--square":
+        write_poly(square_box(sys.argv[2]), sys.argv[3], sys.argv[2])
+        sys.exit()
     a = read_poly(sys.argv[1])
     w = widen(a)
     print("riquadro", [round(x, 4) for x in w.bounds])
