@@ -349,7 +349,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          last=$(gh release list --limit 300 --json tagName --jq '.[].tagName' | grep "^zona-$ID-" | sort -r | head -1)
+          last=$(gh release list --limit 300 --json tagName --jq '.[].tagName' | grep -E "^zona-$ID-[0-9]+$" | sort -r | head -1)
           if [ -n "$last" ] && gh release download "$last" -p zona.json -D prev \
              && [ "$(jq -r .contours prev/zona.json)" = "$CONTOURS" ] \
              && gh release download "$last" -p curve.pmtiles -p quote.tar -D out; then
@@ -414,7 +414,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release list --limit 300 --json tagName --jq '.[].tagName' \
-            | grep "^zona-$ID-" | sort -r | tail -n +3 \
+            | grep -E "^zona-$ID-[0-9]+$" | sort -r | tail -n +3 \
             | xargs -r -I{} gh release delete {} --yes --cleanup-tag
 
   brouter:
@@ -442,7 +442,7 @@ jobs:
         run: |
           tags=$(gh release list --limit 300 --json tagName --jq '.[].tagName')
           for id in $(jq -r '.zones[].id' zone/zone.json); do
-            last=$(echo "$tags" | grep "^zona-$id-" | sort -r | head -1)
+            last=$(echo "$tags" | grep -E "^zona-$id-[0-9]+$" | sort -r | head -1)
             [ -n "$last" ] && gh release download "$last" -p zona.json -D "zones/$id"
           done
 
@@ -513,7 +513,7 @@ jobs:
         run: |
           tags=$(gh release list --limit 300 --json tagName --jq '.[].tagName')
           for id in $(jq -r '.zones[].id' zone/zone.json); do
-            last=$(echo "$tags" | grep "^zona-$id-" | sort -r | head -1)
+            last=$(echo "$tags" | grep -E "^zona-$id-[0-9]+$" | sort -r | head -1)
             [ -n "$last" ] && gh release download "$last" -p zona.json -D "zones/$id"
           done
           ls -R zones
