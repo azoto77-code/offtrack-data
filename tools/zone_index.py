@@ -103,12 +103,14 @@ def zone(a):
 
 
 def presentation(info):
-    """What the list says about how a zone is shown: its names in the other languages and whether it is legacy."""
+    """What the list says about how a zone is shown: its names in the other languages and, when it is legacy, the
+    regions that replace it."""
     doc = {}
     if "names" in info:
         doc["names"] = info["names"]
     if info.get("legacy"):
         doc["legacy"] = True
+        doc["replaced_by"] = info["replaced_by"]
     return doc
 
 
@@ -122,6 +124,7 @@ def index(a):
             if z["id"] in infos:
                 z.pop("names", None)
                 z.pop("legacy", None)
+                z.pop("replaced_by", None)
                 z.update(presentation(infos[z["id"]]))
     # A zone's box widened by 20 km touches 5x5 degree squares that are open sea, and brouter.de has no segment
     # for those: the list of what the server really has prunes them, or the app would ask for a file that is not there.
