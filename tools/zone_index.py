@@ -8,7 +8,9 @@ joins the zona.json of every zone into indice.json, the list the app reads first
     zone_index.py zone OUT_DIR ZONES.json ID AREA.poly --edition 20261104 --tag zona-nord-ovest-20261104
                   --valhalla 3.6.3 --contours 20m-1
     zone_index.py index OUT.json ZONA.json [ZONA.json ...] [--brouter-url URL] [--brouter-have LIST] [--contours 20m-1]
-                  LIST names the segments the URL really serves, one a line: the others leave the zones' lists
+                  [--zones ZONES.json]
+                  LIST names the segments the URL really serves, one a line: the others leave the zones' lists;
+                  ZONES.json lends every zone its names and legacy as they are now, not as they were when it was built
     zone_index.py terrain OUT.json DIR --contours 20m-1 [--previous OLD.json]
                   the manifest of one row of the shared terrain: the squares in DIR added to those of OLD.json
 """
@@ -63,6 +65,9 @@ def zone(a):
     doc = {
         "id": info["id"],
         "name": info["name"],
+        # The name in the other languages of the app, and legacy on a zone the app no longer offers (kept for the
+        # phones that have it): the list is what the app shows, so both come from the list, not from the build.
+        **presentation(info),
         "country": info["country"],
         "edition": a.edition,
         "tag": a.tag,
@@ -97,8 +102,27 @@ def zone(a):
     print(f"  BRouter: {', '.join(doc['brouter'])}")
 
 
+def presentation(info):
+    """What the list says about how a zone is shown: its names in the other languages and whether it is legacy."""
+    doc = {}
+    if "names" in info:
+        doc["names"] = info["names"]
+    if info.get("legacy"):
+        doc["legacy"] = True
+    return doc
+
+
 def index(a):
     zones = [json.loads(Path(p).read_text()) for p in a.zones]
+    # A zona.json says what the list said when the zone was built: the names and legacy of the list now win, so a
+    # change to the list reaches the app at the next index without building every zone again.
+    if a.zones_list:
+        infos = {z["id"]: z for z in json.loads(Path(a.zones_list).read_text())["zones"]}
+        for z in zones:
+            if z["id"] in infos:
+                z.pop("names", None)
+                z.pop("legacy", None)
+                z.update(presentation(infos[z["id"]]))
     # A zone's box widened by 20 km touches 5x5 degree squares that are open sea, and brouter.de has no segment
     # for those: the list of what the server really has prunes them, or the app would ask for a file that is not there.
     if a.brouter_have:
@@ -159,6 +183,7 @@ def main():
     i.add_argument("--brouter-url", default="https://brouter.de/brouter/segments4")
     i.add_argument("--brouter-have")
     i.add_argument("--contours", default="")
+    i.add_argument("--zones", dest="zones_list")
     t = sub.add_parser("terrain")
     t.add_argument("out")
     t.add_argument("dir")

@@ -29,7 +29,7 @@ on:
         default: "tutti"
         type: string
       zones:
-        description: "Zones to cut among them (ids separated by spaces), or tutti"
+        description: "Zones to cut among them (ids separated by spaces), tutti, or nessuna to write only the index"
         default: "tutti"
         type: string
   pull_request:
@@ -114,6 +114,7 @@ jobs:
   valhalla:
     # One build per block, cut zone by zone. Each block is a job of its own: a failure stops only its zones.
     needs: prepare
+    if: ${{ needs.prepare.outputs.blocks != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 340
     strategy:
@@ -484,9 +485,10 @@ jobs:
 
   index:
     # The list the app reads: the newest edition of every zone, also when one of them failed this month. It also
-    # lists the squares of shared terrain still to build, for the terreno job below.
+    # lists the squares of shared terrain still to build, for the terreno job below. Run by hand with no zone to
+    # cut, it writes the index alone: a change to the names or the legacy of zone.json reaches the app in minutes.
     needs: [prepare, valhalla, zone, brouter]
-    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.zone.result != 'skipped' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.zone.result != 'skipped' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     outputs:
       bands: ${{ steps.squares.outputs.bands }}
@@ -519,12 +521,20 @@ jobs:
           ls -R zones
 
       - name: Write the index
-        # The BRouter copy of this edition when it is there, brouter.de otherwise (and in a pull request). Only the
-        # segments the server really has go in the list: a square of open sea has none.
+        # The BRouter copy of this edition when it is there, the last copy published when this run made none,
+        # brouter.de otherwise (and in a pull request). Only the segments the server really has go in the list: a
+        # square of open sea has none.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           url="https://brouter.de/brouter/segments4"
-          if [ "${{ github.event_name }}" != pull_request ] && [ "${{ needs.brouter.result }}" = success ]; then
-            url="https://github.com/${{ github.repository }}/releases/download/brouter-${{ needs.prepare.outputs.edition }}"
+          if [ "${{ github.event_name }}" != pull_request ]; then
+            if [ "${{ needs.brouter.result }}" = success ]; then
+              url="https://github.com/${{ github.repository }}/releases/download/brouter-${{ needs.prepare.outputs.edition }}"
+            else
+              last=$(gh release list --limit 300 --json tagName --jq '.[].tagName' | grep -E '^brouter-[0-9]+$' | sort -r | head -1)
+              [ -n "$last" ] && url="https://github.com/${{ github.repository }}/releases/download/$last"
+            fi
           fi
           : > segmenti.txt
           for s in $(jq -rs '[.[].brouter[]] | unique | .[]' zones/*/zona.json); do
@@ -536,7 +546,7 @@ jobs:
             esac
           done
           python3 tools/zone_index.py index indice.json zones/*/zona.json --brouter-url "$url" \
-            --brouter-have segmenti.txt --contours "$CONTOURS"
+            --brouter-have segmenti.txt --contours "$CONTOURS" --zones zone/zone.json
 
       - name: List the squares of terrain to build
         id: squares
