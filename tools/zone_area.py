@@ -129,7 +129,8 @@ def land(area, coastline):
     kept = []
     for p in pieces:
         prepare(p)
-        on = tree.query(p.exterior, predicate="dwithin", distance=1e-7)
+        # The coast can be an inner ring of a piece: the sea around an island has it as a hole.
+        on = tree.query(p.boundary, predicate="dwithin", distance=1e-7)
         sea = sum(p.contains(rights[i]) for i in on)
         dry = sum(p.contains(lefts[i]) for i in on)
         if sea <= dry:

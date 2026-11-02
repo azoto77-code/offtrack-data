@@ -54,6 +54,10 @@ class AreaTest(unittest.TestCase):
         # An island in the sea is a ring drawn counterclockwise: it stays.
         island = LineString([(8, 2), (9, 2), (9, 3), (8, 3), (8, 2)])
         self.assertAlmostEqual(land(area, coast + [island]).area, 64.42, places=2)
+        # An island alone, like Corsica in its .poly: the sea around it has the coast as a hole, and goes.
+        self.assertAlmostEqual(land(area, [island]).area, 1.0, places=6)
+        # A lake is a ring drawn clockwise, the water on the right inside: it goes too.
+        self.assertAlmostEqual(land(area, [LineString([(2, 2), (2, 3), (3, 3), (3, 2), (2, 2)])]).area, 99.0, places=6)
         # A coast that does not cross the whole area, or none, leaves it as it is.
         self.assertEqual(land(area, [LineString([(6, -1), (6, 4)])]).area, 100)
         self.assertEqual(land(area, []).area, 100)
