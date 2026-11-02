@@ -12,8 +12,8 @@ import math
 import sys
 from pathlib import Path
 
-from shapely import box, prepare, union_all
-from shapely.geometry import Polygon, mapping
+from shapely import STRtree, box, polygonize, prepare, union_all
+from shapely.geometry import LineString, Point, Polygon, mapping, shape
 
 # Every file of a zone reaches this far beyond its border, so a road that runs along it, or a point just across, is
 # there whichever zone the rider is in.
@@ -96,6 +96,46 @@ def segments(area):
             if area.intersects(box(w, s, w + 5, s + 5)):
                 out.append(f"{'E' if w >= 0 else 'W'}{abs(w)}_{'N' if s >= 0 else 'S'}{abs(s)}")
     return sorted(out)
+
+
+def read_coastline(path):
+    """The coastline of OpenStreetMap inside a zone, as osmium export writes it from the ways tagged
+    natural=coastline: one line each, drawn with the land on its left."""
+    doc = json.loads(Path(path).read_text())
+    return [shape(f["geometry"]) for f in doc["features"] if f["geometry"]["type"] == "LineString"]
+
+
+def land(area, coastline):
+    """[area] without the sea: the .poly of Geofabrik and the border of a country both run out to sea, so the lines of
+    [coastline] cut [area] in pieces, and a piece is sea when a stretch of coast runs along it with the water on
+    its side (the right of the line). A piece no coast runs along is land, so where the coastline has a gap or does
+    not cross the area at all nothing is lost."""
+    lines = [c for c in coastline if c.intersects(area)]
+    if not lines:
+        return area
+    pieces = [p for p in polygonize([union_all([area.boundary, *lines])]).geoms if area.contains(p.representative_point())]
+    # The middle of every stretch of coast, with a point a few metres to its left and to its right.
+    mids, lefts, rights = [], [], []
+    for line in lines:
+        c = line.coords
+        for (x0, y0), (x1, y1) in zip(c[:-1], c[1:]):
+            dx, dy = x1 - x0, y1 - y0
+            n = math.hypot(dx, dy) or 1
+            dx, dy = dx / n * 1e-5, dy / n * 1e-5
+            mids.append(Point((x0 + x1) / 2, (y0 + y1) / 2))
+            lefts.append(Point((x0 + x1) / 2 - dy, (y0 + y1) / 2 + dx))
+            rights.append(Point((x0 + x1) / 2 + dy, (y0 + y1) / 2 - dx))
+    tree = STRtree(mids)
+    kept = []
+    for p in pieces:
+        prepare(p)
+        on = tree.query(p.exterior, predicate="dwithin", distance=1e-7)
+        sea = sum(p.contains(rights[i]) for i in on)
+        dry = sum(p.contains(lefts[i]) for i in on)
+        if sea <= dry:
+            kept.append(p)
+    dry = union_all(kept).buffer(0)
+    return area if dry.is_empty else dry
 
 
 def outline(area):

@@ -282,6 +282,10 @@ jobs:
           else
             curl -fsSL --retry 3 -o "areas/$ID.poly" "$GEOFABRIK/${{ matrix.zone.geofabrik }}.poly"
           fi
+          # The coastline, to draw the outline of the zone along the shore: the border runs out to sea.
+          osmium tags-filter work/zone.osm.pbf w/natural=coastline -o work/coast.osm.pbf
+          osmium export work/coast.osm.pbf --geometry-types=linestring -o coast.geojson
+          rm work/coast.osm.pbf
           ls -la work
 
       - name: Write the points of interest
@@ -387,7 +391,9 @@ jobs:
           mv "valhalla/$ID.tar" out/valhalla.tar
           rm -r valhalla
           python3 tools/zone_index.py zone out zone/zone.json "$ID" "areas/$ID.poly" \
-            --edition "${{ needs.prepare.outputs.edition }}" --tag "$TAG" --valhalla "$VALHALLA" --contours "$CONTOURS"
+            --edition "${{ needs.prepare.outputs.edition }}" --tag "$TAG" --valhalla "$VALHALLA" --contours "$CONTOURS" \
+            --coastline coast.geojson
+          rm coast.geojson
           ls -la out
 
       - name: Keep the test files
