@@ -140,8 +140,12 @@ def land(area, coastline):
 
 
 def outline(area):
-    """A light GeoJSON outline of [area] for the zone list of the app: about 1 km of detail, 5 decimals."""
-    g = mapping(area.simplify(0.01))
+    """A light GeoJSON outline of [area] for the zone list of the app: about 1 km of detail, 5 decimals, and no
+    rock smaller than about a square kilometre (Corsica alone has 1300 of them), unless it is all there is."""
+    g = area.simplify(0.01)
+    parts = list(g.geoms) if hasattr(g, "geoms") else [g]
+    parts = [p for p in parts if p.area >= 1e-4] or [max(parts, key=lambda p: p.area)]
+    g = mapping(parts[0] if len(parts) == 1 else union_all(parts))
 
     def rounded(c):
         return [round(c[0], 5), round(c[1], 5)] if isinstance(c[0], float) else [rounded(x) for x in c]

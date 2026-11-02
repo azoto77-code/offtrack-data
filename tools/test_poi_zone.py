@@ -6,7 +6,7 @@ from shapely import box
 from poi_zone import Points, entry, inside, kind_of
 from shapely.geometry import LineString
 
-from zone_area import land, segments, square_name, squares, widen
+from zone_area import land, outline, segments, square_name, squares, widen
 
 
 class KindsTest(unittest.TestCase):
@@ -61,6 +61,13 @@ class AreaTest(unittest.TestCase):
         # A coast that does not cross the whole area, or none, leaves it as it is.
         self.assertEqual(land(area, [LineString([(6, -1), (6, 4)])]).area, 100)
         self.assertEqual(land(area, []).area, 100)
+
+    def test_the_outline_drops_the_rocks(self):
+        rock = box(5, 5, 5.005, 5.005)
+        o = outline(box(0, 0, 1, 1).union(box(2, 2, 2.05, 2.05)).union(rock))
+        self.assertEqual(o["type"], "MultiPolygon")
+        self.assertEqual(len(o["coordinates"]), 2)
+        self.assertEqual(outline(rock)["type"], "Polygon")
 
     def test_points_outside_the_zone_are_dropped(self):
         rows = {"n1": ["n1", "fuel", 44.3, 8.4, None, {}], "n2": ["n2", "ferry_terminal", 35.78, -5.81, None, {}]}
