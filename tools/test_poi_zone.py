@@ -4,7 +4,9 @@ import unittest
 from shapely import box
 
 from poi_zone import Points, entry, inside, kind_of
-from zone_area import segments, square_name, squares, widen
+from shapely.geometry import LineString
+
+from zone_area import land, outline, segments, square_name, squares, widen
 
 
 class KindsTest(unittest.TestCase):
@@ -40,6 +42,32 @@ class AreaTest(unittest.TestCase):
         self.assertEqual(squares(area), ["N44E007", "N44E008", "N44E009", "N44E010"])
         self.assertEqual(segments(area), ["E10_N40", "E5_N40"])
         self.assertEqual(segments(box(-1, 43, 1, 46)), ["E0_N40", "E0_N45", "W5_N40", "W5_N45"])
+
+    def test_the_sea_is_cut_off_along_the_coast(self):
+        area = box(0, 0, 10, 10)
+        # The coast runs north with the land on its left: the west of the area stays, the east is sea.
+        coast = [LineString([(6, -1), (6, 4), (7, 5), (6, 11)])]
+        self.assertAlmostEqual(land(area, coast).area, 63.42, places=2)
+        # Cut in two ways at a node, the same.
+        self.assertAlmostEqual(land(area, [LineString([(6, -1), (6, 4)]), LineString([(6, 4), (7, 5), (6, 11)])]).area,
+                               63.42, places=2)
+        # An island in the sea is a ring drawn counterclockwise: it stays.
+        island = LineString([(8, 2), (9, 2), (9, 3), (8, 3), (8, 2)])
+        self.assertAlmostEqual(land(area, coast + [island]).area, 64.42, places=2)
+        # An island alone, like Corsica in its .poly: the sea around it has the coast as a hole, and goes.
+        self.assertAlmostEqual(land(area, [island]).area, 1.0, places=6)
+        # A lake is a ring drawn clockwise, the water on the right inside: it goes too.
+        self.assertAlmostEqual(land(area, [LineString([(2, 2), (2, 3), (3, 3), (3, 2), (2, 2)])]).area, 99.0, places=6)
+        # A coast that does not cross the whole area, or none, leaves it as it is.
+        self.assertEqual(land(area, [LineString([(6, -1), (6, 4)])]).area, 100)
+        self.assertEqual(land(area, []).area, 100)
+
+    def test_the_outline_drops_the_rocks(self):
+        rock = box(5, 5, 5.005, 5.005)
+        o = outline(box(0, 0, 1, 1).union(box(2, 2, 2.05, 2.05)).union(rock))
+        self.assertEqual(o["type"], "MultiPolygon")
+        self.assertEqual(len(o["coordinates"]), 2)
+        self.assertEqual(outline(rock)["type"], "Polygon")
 
     def test_points_outside_the_zone_are_dropped(self):
         rows = {"n1": ["n1", "fuel", 44.3, 8.4, None, {}], "n2": ["n2", "ferry_terminal", 35.78, -5.81, None, {}]}

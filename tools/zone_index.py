@@ -6,7 +6,8 @@ and sha256 of each file, so the app downloads again only the files that changed 
 joins the zona.json of every zone into indice.json, the list the app reads first.
 
     zone_index.py zone OUT_DIR ZONES.json ID AREA.poly --edition 20261104 --tag zona-nord-ovest-20261104
-                  --valhalla 3.6.3 --contours 20m-1
+                  --valhalla 3.6.3 --contours 20m-1 [--coastline COAST.geojson]
+                  COAST.geojson is the coastline in the zone, to draw the outline along the shore and not out at sea
     zone_index.py index OUT.json ZONA.json [ZONA.json ...] [--brouter-url URL] [--brouter-have LIST] [--contours 20m-1]
                   [--zones ZONES.json]
                   LIST names the segments the URL really serves, one a line: the others leave the zones' lists;
@@ -23,7 +24,7 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-from zone_area import outline, read_poly, segments, squares, widen
+from zone_area import land, outline, read_coastline, read_poly, segments, squares, widen
 
 GEOFABRIK = "https://download.geofabrik.de"
 BASE_URL = "https://github.com/azoto77-code/offtrack-data/releases/download"
@@ -72,7 +73,9 @@ def zone(a):
         "edition": a.edition,
         "tag": a.tag,
         "box": [round(x, 4) for x in wide.bounds],
-        "outline": outline(area),
+        # The outline the app draws: the .poly of Geofabrik and the border of a country run out to sea, so the sea is
+        # cut off along the coast. The files keep the whole area: the sea costs nothing there.
+        "outline": outline(land(area, read_coastline(a.coastline)) if a.coastline else area),
         "files": files,
         "bytes": sum(f["bytes"] for f in files.values()),
         "valhalla": a.valhalla,
@@ -100,6 +103,8 @@ def zone(a):
     for name, f in files.items():
         print(f"  {name}: {f['bytes'] / 1e6:.1f} MB")
     print(f"  BRouter: {', '.join(doc['brouter'])}")
+    rings = doc["outline"]["coordinates"] if doc["outline"]["type"] == "MultiPolygon" else [doc["outline"]["coordinates"]]
+    print(f"  contorno: {len(rings)} poligoni, {sum(len(r[0]) for r in rings)} punti")
 
 
 def presentation(info):
@@ -180,6 +185,7 @@ def main():
     z.add_argument("--tag", required=True)
     z.add_argument("--valhalla", required=True)
     z.add_argument("--contours", required=True)
+    z.add_argument("--coastline")
     i = sub.add_parser("index")
     i.add_argument("out")
     i.add_argument("zones", nargs="+")
