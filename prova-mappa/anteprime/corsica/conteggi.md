@@ -6,8 +6,8 @@
 | strade: km | 111.2 | 124.4 | 117.7 |
 | POI | 109 | 2268 | 960 |
 | civici | 0 | 1417 | 288 |
-| edifici: ettari | 32.3 | 67.7 | 4.5 |
-| edifici: poligoni | 480 | 3874 | 74 |
+| edifici: ettari | 59.2 | 67.7 | 62.9 |
+| edifici: poligoni | 764 | 3874 | 2218 |
 | luoghi e POI con nome | 111 | 663 | 626 |
 | strade con nome | 267 | 281 | 273 |
 | strade: corridor km | 0.0 | 0.0 | 0 |
