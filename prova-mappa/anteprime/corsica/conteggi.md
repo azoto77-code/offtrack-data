@@ -5,10 +5,11 @@
 |---|---|---|---|
 | strade: km | 111.2 | 124.4 | 117.7 |
 | POI | 109 | 2268 | 960 |
-| civici | 0 | 1417 | 491 |
-| edifici | 33 | 3866 | 31 |
+| civici | 0 | 1417 | 288 |
+| edifici: ettari | 32.3 | 67.7 | 4.5 |
+| edifici: poligoni | 480 | 3874 | 74 |
 | luoghi e POI con nome | 111 | 663 | 626 |
-| strade con nome | 267 | 281 | 0 |
+| strade con nome | 267 | 281 | 273 |
 | strade: corridor km | 0.0 | 0.0 | 0 |
 | strade: crossing km | 0.0 | 0.0 | 0 |
 | strade: cycleway km | 2.1 | 2.2 | 0 |
@@ -42,9 +43,10 @@
 | strade: km | 34.7 | 37.5 | 35.3 |
 | POI | 7 | 65 | 62 |
 | civici | 0 | 1 | 1 |
-| edifici | 6 | 334 | 13 |
+| edifici: ettari | 1.5 | 3.1 | 2.9 |
+| edifici: poligoni | 59 | 334 | 283 |
 | luoghi e POI con nome | 16 | 42 | 37 |
-| strade con nome | 6 | 6 | 0 |
+| strade con nome | 6 | 6 | 6 |
 | strade: footway km | 0.1 | 0.1 | 0 |
 | strade: minor km | 0 | 0 | 1.8 |
 | strade: path km | 6.4 | 6.9 | 6.9 |
