@@ -6,7 +6,8 @@ first kind whose tags are all on the element wins, ways and relations stand at t
 the tags the app keeps for the card are written. Gates count only where they close a dirt track. Speed cameras are
 kept everywhere: the app lets the user hide them where showing them is forbidden. With --cameras, the speed cameras of
 MapAtlas in that folder are added where OSM has none (cameras.py). With --roads, the official average speed stretches
-(--tutor, --dgt) are placed on its motorways and main roads and the DGT's fixed cameras added (sections.py).
+(--tutor, --dgt) are placed on its motorways and main roads and the DGT's fixed cameras added (sections.py). With
+--france, the radars of the Sécurité routière are added as MapAtlas's are, with their limits (france.py).
 
 Only the points inside the zone, widened by a few kilometres, are kept: an extract carries whole ferry routes, so
 terminals as far as Tangier come along. The file is poi.json.gz: {"zone", "date", "count", "pois": [[id, kind, lat,
@@ -25,6 +26,7 @@ import osmium
 from shapely import contains_xy, prepare
 
 import cameras
+import france
 import sections
 from zone_area import read_poly, widen
 
@@ -199,6 +201,7 @@ def main():
     p.add_argument("--roads", type=Path, help="motorways and main roads of the zone, with their exits")
     p.add_argument("--tutor", type=Path, help="the Tutor stretches, tools/data/tutor.csv")
     p.add_argument("--dgt", type=Path, help="the DGT's DATEX II list of cameras")
+    p.add_argument("--france", type=Path, help="the Sécurité routière's list of radars, /radars/all?_format=json")
     a = p.parse_args()
 
     h = Points()
@@ -219,6 +222,12 @@ def main():
             print(f"  DGT: {len(fixed)} autovelox fissi nella zona, {added} aggiunti")
         if missing:
             print(f"  uscite dei Tutor non trovate su OSM: {', '.join(f'{k} ({v})' for k, v in sorted(missing.items()))}")
+    if a.france and a.france.exists():
+        fr = inside({e[0]: e for e in france.load(a.france)}, area)
+        pages = france.add_details(list(fr.values()))
+        added, lent = cameras.merge(points, list(fr.values()))
+        print(f"  Sécurité routière: {len(fr)} radar nella zona ({pages} con la scheda), {added} aggiunti, "
+              f"{lent} limiti dati a quelli di OSM")
     if a.cameras:
         extra = inside({e[0]: e for e in cameras.load(a.cameras)}, area)
         added, lent = cameras.merge(points, list(extra.values()))

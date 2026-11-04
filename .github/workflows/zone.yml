@@ -41,6 +41,8 @@ on:
       - "tools/cameras.py"
       - "tools/test_cameras.py"
       - "tools/sections.py"
+      - "tools/france.py"
+      - "tools/test_france.py"
       - "tools/test_sections.py"
       - "tools/data/**"
       - "tools/dem_zone.py"
@@ -265,7 +267,7 @@ jobs:
 
       - name: Check the tools
         working-directory: tools
-        run: python3 -m unittest test_poi_zone test_cameras test_sections test_search_zone test_difficulty_layer -v
+        run: python3 -m unittest test_poi_zone test_cameras test_sections test_france test_search_zone test_difficulty_layer -v
 
       - name: Take the border of the zone
         uses: actions/download-artifact@v4
@@ -309,20 +311,25 @@ jobs:
               || { echo "MapAtlas $c non scaricato"; rm -f "work/cameras/$c.geojson"; }
           done
           # The official average speed stretches, placed on the motorways and main roads of the zone: the Tutor of the
-          # Polizia di Stato in Italy (tools/data/tutor.csv), the DGT's in Spain with its fixed cameras (CC BY).
+          # Polizia di Stato in Italy (tools/data/tutor.csv), the DGT's in Spain with its fixed cameras (CC BY). In
+          # France the radars of the Sécurité routière's map, with their limits.
           official=()
           case "${{ matrix.zone.country }}" in
             IT) official=(--tutor tools/data/tutor.csv) ;;
             ES) curl -fsSL --retry 3 -o work/dgt.xml "https://nap.dgt.es/datex2/dgt/PredefinedLocationsPublication/radares/content.xml" \
                   && official=(--dgt work/dgt.xml) || echo "::warning::elenco DGT non scaricato" ;;
           esac
-          if [ ${#official[@]} -gt 0 ]; then
+          if [ "${{ matrix.zone.country }}" = FR ]; then
+            curl -fsSL --retry 3 -A "OffTrack-data" -o work/radars-fr.json "https://radars.securite-routiere.gouv.fr/radars/all?_format=json" \
+              && official+=(--france work/radars-fr.json) || echo "::warning::radar francesi non scaricati"
+          fi
+          if [ "${{ matrix.zone.country }}" = IT ] || [ "${{ matrix.zone.country }}" = ES ]; then
             osmium tags-filter work/zone.osm.pbf w/highway=motorway,trunk,primary,secondary n/highway=motorway_junction \
               -o work/roads.osm.pbf
             official+=(--roads work/roads.osm.pbf)
           fi
           python3 tools/poi_zone.py out/poi.json.gz "areas/$ID.poly" work/poi.osm.pbf --cameras work/cameras "${official[@]}"
-          rm -f work/roads.osm.pbf work/dgt.xml
+          rm -f work/roads.osm.pbf work/dgt.xml work/radars-fr.json
 
       - name: Write the search index
         # Everything with a name or a house number, and the municipal borders to tell where each one lies.
