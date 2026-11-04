@@ -6,8 +6,8 @@
 | strade: km | 369.7 | 404.2 | 436.1 |
 | POI | 414 | 9580 | 5360 |
 | civici | 0 | 10465 | 1082 |
-| edifici: ettari | 208.8 | 251.3 | 153.7 |
-| edifici: poligoni | 2733 | 6252 | 3434 |
+| edifici: ettari | 231.3 | 251.3 | 233.1 |
+| edifici: poligoni | 3071 | 6252 | 5065 |
 | luoghi e POI con nome | 422 | 3971 | 3405 |
 | strade con nome | 1046 | 1079 | 1063 |
 | strade: bridge km | 0 | 0 | 7.9 |
@@ -51,8 +51,8 @@
 | strade: km | 43.6 | 46.5 | 44.0 |
 | POI | 12 | 46 | 39 |
 | civici | 0 | 1 | 1 |
-| edifici: ettari | 9.1 | 11.8 | 2.9 |
-| edifici: poligoni | 219 | 870 | 179 |
+| edifici: ettari | 9.1 | 11.8 | 10.8 |
+| edifici: poligoni | 219 | 870 | 609 |
 | luoghi e POI con nome | 18 | 39 | 32 |
 | strade con nome | 5 | 5 | 5 |
 | strade: footway km | 0.1 | 0.1 | 0 |
