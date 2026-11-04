@@ -26,21 +26,6 @@ jobs:
           ls -la
       - name: Sections
         run: /usr/bin/time -v python3 tools/sections.py roads.osm.pbf tratti.geojson ${{ matrix.args }} 2>&1 | grep -v "^\s*\(Page\|Socket\|Signals\|Swaps\|File system\|Average\|Exit\|Voluntary\|Involuntary\|Minor\|Major\|Percent\|Command\)"
-      - name: Refs
-        run: |
-          python3 - <<'P'
-          import osmium, collections
-          c = collections.Counter()
-          class H(osmium.SimpleHandler):
-              def way(self, w):
-                  if w.tags.get("highway") in ("motorway", "trunk"):
-                      r = w.tags.get("ref") or ""
-                      if r.upper().replace(" ", "").startswith(("A1", "SPV", "A23", "A4", "A30", "A36", "A22")) or "dir" in r.lower():
-                          c[(r, w.tags.get("name"))] += 1
-          H().apply_file("roads.osm.pbf")
-          for (r, n), k in sorted(c.items(), key=lambda x: str(x[0])):
-              print(k, r, "|", n)
-          P
       - uses: actions/upload-artifact@v4
         with:
           name: tratti-${{ matrix.name }}

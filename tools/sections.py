@@ -180,7 +180,7 @@ ROAD_REFS = {"RAC RM N": "A1DIR", "RAC RM S": "A1DIR"}
 INTERCHANGE_M = 1000.0
 
 # The points of a road taken as its interchange: both carriageways at the place where it comes nearest the other road.
-INTERCHANGE_NEAR_M = 150.0
+INTERCHANGE_NEAR_M = 300.0
 
 # Two places where the same roads meet are this far apart at least.
 INTERCHANGE_APART_M = 5000.0
@@ -530,23 +530,27 @@ def build(pbf, tutor=None, dgt=None, log=print):
     pairs = {interchange(n) for r in tutor or [] for n in r[:2]} - {None}
     places = interchanges(pbf, pairs) if pairs else {}
     for da, a, d, note in tutor or []:
-        sa = places.get(interchange(da)) or lookup(j.by_name, da)
-        sb = places.get(interchange(a)) or lookup(j.by_name, a)
-        # "ROVIGO" found only as "Rovigo Sud", the other end: not the same exit twice.
-        sa, sb = [x for x in sa if x not in sb], [y for y in sb if y not in sa]
-        if not sa or not sb:
-            if sa or sb:
+        # The ends by the roads of an interchange, then by its name on OSM when the first give no road between.
+        tries = []
+        for sa, sb in ((places.get(interchange(da)) or lookup(j.by_name, da), places.get(interchange(a)) or lookup(j.by_name, a)),
+                       (lookup(j.by_name, da), lookup(j.by_name, a))):
+            # "ROVIGO" found only as "Rovigo Sud", the other end: not the same exit twice.
+            sa, sb = [x for x in sa if x not in sb], [y for y in sb if y not in sa]
+            near = [(x, y) for x in sa for y in sb if distance_m(x[1:], y[1:]) <= MAX_SECTION_M]
+            if near and (sa, sb) not in [t[:2] for t in tries]:
+                tries.append((sa, sb, near))
+            if not tries and (sa or sb) and not (sa and sb):
                 # One end is in the zone: the name of the other is not on OSM as written.
                 for name, found in ((da, sa), (a, sb)):
                     if not found:
                         missing[name] = missing.get(name, 0) + 1
+                break
+        if not tries:
             continue
-        pairs = [(x, y) for x in sa for y in sb if distance_m(x[1:], y[1:]) <= MAX_SECTION_M]
-        if not pairs:
-            continue
-        wanted.append(("tutor", (da, a, d, note), [x[1:] for x in sa], [y[1:] for y in sb]))
-        for x, y in pairs:
-            cells |= cells_around(x[1:], y[1:])
+        wanted.append(("tutor", (da, a, d, note), [([x[1:] for x in sa], [y[1:] for y in sb]) for sa, sb, _ in tries]))
+        for _, _, near in tries:
+            for x, y in near:
+                cells |= cells_around(x[1:], y[1:])
     dgt_sections, dgt_fixed = dgt_list(dgt) if dgt else ([], [])
     for s in dgt_sections:
         cells |= cells_around(s[2], s[3], pad=0)
@@ -558,9 +562,13 @@ def build(pbf, tutor=None, dgt=None, log=print):
     grid = segment_grid(roads)
     out = []
     lost = []
-    for _, (da, a, d, note), sa, sb in wanted:
-        # The exit is on its carriageway, or on the slip road just off it.
-        found = between(roads, grid, sa, sb, TUTOR_CLASSES, MAX_SECTION_M, radius=JUNCTION_M)
+    for _, (da, a, d, note), tries in wanted:
+        found = None
+        for sa, sb in tries:
+            # The exit is on its carriageway, or on the slip road just off it.
+            found = between(roads, grid, sa, sb, TUTOR_CLASSES, MAX_SECTION_M, radius=JUNCTION_M)
+            if found and found[0] >= MIN_SECTION_M:
+                break
         if not found or found[0] < MIN_SECTION_M:
             lost.append(f"{da} - {a} ({d})")
             continue
