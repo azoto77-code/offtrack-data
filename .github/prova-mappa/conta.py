@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """What each map keeps around a few places, for the trial of prova-mappa.yml: the same 3x3 tiles of zoom 15 are read
 from the z15 file and, cut to the same ground, from the z14 ones. Prints a Markdown table per place and draws the
-data of each file side by side in PREVIEWS/<name>.png: roads by kind, buildings, house numbers, named points.
+data of the central tile of each file side by side in PREVIEWS/<name>.png: roads by kind, buildings, house numbers,
+named points.
 
     conta.py OUT_DIR PREVIEWS LAT LON NAME [LAT LON NAME ...]
 """
@@ -16,6 +17,7 @@ from pmtiles.reader import MmapSource, Reader
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection, PolyCollection
 from shapely import affinity
 from shapely.geometry import box, shape
 from shapely.validation import make_valid
@@ -77,12 +79,12 @@ def summary(feats, metres_per_tile):
         if layer in ("roads", "transportation"):
             s["strade: km"] += g.length * m / 1000
             s[f"strade: {kind} km"] += g.length * m / 1000
-            if p.get("name"):
-                names["strade con nome"].add(p["name"])
-        elif layer in ("buildings", "building"):
-            if g.geom_type in ("Polygon", "MultiPolygon"):
-                s["edifici"] += 1
-        if p.get("addr_housenumber") or p.get("housenumber"):
+        if layer in ("roads", "transportation_name") and p.get("name"):
+            names["strade con nome"].add(p["name"])
+        if layer in ("buildings", "building") and g.geom_type in ("Polygon", "MultiPolygon"):
+            s["edifici: ettari"] += g.area * m * m / 10000
+            s["edifici: poligoni"] += len(polygons_of(g))
+        if (p.get("addr_housenumber") or p.get("housenumber")) and g.geom_type == "Point":
             s["civici"] += 1
         if layer in ("pois", "poi"):
             s["POI"] += 1
@@ -122,41 +124,46 @@ def polygons_of(g):
 
 
 def draw(ax, feats, title, counts):
-    size = 4096 * (2 * RADIUS + 1)
+    """The central z15 tile of the block (about 900 m a side), where house numbers and names can still be read."""
+    lo, hi = 4096 * RADIUS, 4096 * (RADIUS + 1)
+    view = box(lo, lo, hi, hi)
+    water, buildings, roads, colours, widths = [], [], [], [], []
     for layer, p, g in feats:
-        if layer in ("buildings", "building"):
-            for poly in polygons_of(g):
-                xs, ys = poly.exterior.xy
-                ax.fill(xs, ys, color="#c9b8a6", linewidth=0)
-    for layer, p, g in feats:
-        if layer in ("water",):
-            for poly in polygons_of(g):
-                xs, ys = poly.exterior.xy
-                ax.fill(xs, ys, color="#a8d0f0", linewidth=0)
-        if layer in ("roads", "transportation"):
+        if not g.intersects(view):
+            continue
+        if layer == "water":
+            water += [list(poly.exterior.coords) for poly in polygons_of(g)]
+        elif layer in ("buildings", "building"):
+            buildings += [list(poly.exterior.coords) for poly in polygons_of(g)]
+        elif layer in ("roads", "transportation"):
             kind = p.get("kind") or p.get("class") or ""
             detail = p.get("kind_detail") or p.get("class") or ""
             colour, width = ROAD_STYLE.get(detail, ROAD_STYLE.get(kind, ("#555555", 0.8)))
-            if detail in ("footway", "path", "steps", "cycleway", "bridleway", "pedestrian"):
+            if detail in ("footway", "path", "steps", "cycleway", "bridleway", "pedestrian", "sidewalk"):
                 colour, width = ROAD_STYLE["path"]
             for l in lines_of(g):
-                xs, ys = l.xy
-                ax.plot(xs, ys, color=colour, linewidth=width, solid_capstyle="round")
+                roads.append(list(l.coords))
+                colours.append(colour)
+                widths.append(width * 1.6)
+    ax.add_collection(PolyCollection(water, facecolors="#a8d0f0", edgecolors="none"))
+    ax.add_collection(PolyCollection(buildings, facecolors="#c9b8a6", edgecolors="#a08c78", linewidths=0.2))
+    ax.add_collection(LineCollection(roads, colors=colours, linewidths=widths, capstyle="round"))
     for layer, p, g in feats:
+        if g.geom_type != "Point" or not view.contains(g):
+            continue
         number = p.get("addr_housenumber") or p.get("housenumber")
-        if number and g.geom_type == "Point":
-            ax.text(g.x, g.y, str(number), fontsize=4, color="#7a3e9d", ha="center", va="center")
-        elif layer in ("pois", "poi", "places", "place", "mountain_peak") and g.geom_type == "Point":
-            ax.plot(g.x, g.y, "o", color="#1f77b4", markersize=1.5)
+        if number:
+            ax.text(g.x, g.y, str(number), fontsize=3.5, color="#7a3e9d", ha="center", va="center")
+        elif layer in ("pois", "poi", "places", "place", "mountain_peak"):
+            ax.plot(g.x, g.y, "o", color="#1f77b4", markersize=1.6)
             if p.get("name"):
-                ax.text(g.x, g.y - 40, p["name"], fontsize=3.2, color="#1f4e79", ha="center")
-    ax.set_xlim(0, size)
-    ax.set_ylim(size, 0)
+                ax.text(g.x, g.y - 25, p["name"], fontsize=3.5, color="#1f4e79", ha="center")
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(hi, lo)
     ax.set_aspect("equal")
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_title(f"{title}\n{counts.get('strade: km', 0):.1f} km di strade, {counts.get('civici', 0)} civici, "
-                 f"{counts.get('edifici', 0)} edifici", fontsize=7)
+    ax.set_title(title, fontsize=9)
 
 
 def main():
@@ -181,10 +188,10 @@ def main():
                         feats += features(reader, maxzoom, cx + dx, cy + dy, dx + RADIUS, dy + RADIUS)
                 cols[stem] = summary(feats, metres)
                 drawn[stem] = feats
-        fig, axes = plt.subplots(1, len(files), figsize=(6 * len(files), 6.6), dpi=220)
+        fig, axes = plt.subplots(1, len(files), figsize=(6 * len(files), 6.4), dpi=250)
         for ax, stem in zip(axes, files):
             draw(ax, drawn[stem], stem, cols[stem])
-        fig.suptitle(name, fontsize=10)
+        fig.suptitle(f"{name}: tile centrale di zoom 15, circa {metres:.0f} m di lato", fontsize=11)
         fig.tight_layout()
         fig.savefig(previews / f"{name}.png")
         plt.close(fig)
