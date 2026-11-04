@@ -1,0 +1,74 @@
+name: Prova mappa OpenFreeMap
+# A trial, not to be merged: cuts the OpenFreeMap world file of the week next to the Protomaps one of the day for a
+# few zones, as "Cut the map" of zone.yml does, to compare their weight. Protomaps is cut both to zoom 15, as in the
+# zones, and to zoom 14, where OpenFreeMap stops. The files are kept as artifacts; nothing is published.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/prova-mappa.yml"
+  workflow_dispatch:
+
+jobs:
+  mappa:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        zone:
+          - {id: nord-ovest, geofabrik: europe/italy/nord-ovest}
+          - {id: corsica, geofabrik: europe/france/corse}
+    env:
+      ID: ${{ matrix.zone.id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the tools
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo rm -f /var/lib/man-db/auto-update
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-shapely
+          gh release download --repo protomaps/go-pmtiles --pattern '*_Linux_x86_64.tar.gz' -D pmtiles-cli
+          tar -xzf pmtiles-cli/*.tar.gz -C pmtiles-cli
+
+      - name: Take the border of the zone
+        run: |
+          mkdir -p out
+          curl -fsSL --retry 3 -o area.poly "https://download.geofabrik.de/${{ matrix.zone.geofabrik }}.poly"
+          python3 tools/zone_area.py area.poly --geojson area.geojson
+
+      - name: Cut both maps
+        run: |
+          for back in 0 1 2 3 4 5 6; do
+            pm="https://build.protomaps.com/$(date -u -d "-$back day" +%Y%m%d).pmtiles"
+            curl -fsI "$pm" > /dev/null && break
+          done
+          # The week OpenFreeMap's server is showing, as OpenFreeMap.kt in the app finds it.
+          ofm=$(curl -fsSL https://tiles.openfreemap.org/planet | python3 -c 'import json,sys; print(json.load(sys.stdin)["tiles"][0])' \
+            | sed -E 's#^https://tiles.openfreemap.org/planet/([^/]+)/.*#https://btrfs.openfreemap.com/areas/planet/\1/tiles.pmtiles#')
+          echo "Protomaps: $pm"
+          echo "OpenFreeMap: $ofm"
+          pmtiles-cli/pmtiles extract "$pm" out/protomaps-z15.pmtiles --region=area.geojson --maxzoom=15 --download-threads=8
+          pmtiles-cli/pmtiles extract "$pm" out/protomaps-z14.pmtiles --region=area.geojson --maxzoom=14 --download-threads=8
+          pmtiles-cli/pmtiles extract "$ofm" out/openfreemap-z14.pmtiles --region=area.geojson --maxzoom=14 --download-threads=8
+
+      - name: Compare
+        run: |
+          {
+            echo "### $ID"
+            echo "| file | MB |"
+            echo "|---|---|"
+            for f in out/*.pmtiles; do
+              python3 -c 'import os,sys; f=sys.argv[1]; print(f"| {os.path.basename(f)} | {os.path.getsize(f)/2**20:.1f} |")' "$f"
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          for f in out/*.pmtiles; do echo "== $f"; pmtiles-cli/pmtiles show "$f" | head -20; done
+
+      - name: Keep the files
+        uses: actions/upload-artifact@v4
+        with:
+          name: mappe-${{ matrix.zone.id }}
+          path: out/
+          retention-days: 14
+          compression-level: 0
