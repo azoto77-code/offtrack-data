@@ -28,6 +28,13 @@ import osmium
 CLASSES = {"motorway", "trunk", "primary", "secondary"}
 TUTOR_CLASSES = {"motorway", "trunk"}
 
+# The slip roads, kept apart: a Tutor stretch may start or end on one, when its exit is mapped on the slip road of an
+# interchange ("Villesse" on the ramp to the A34), and only when the carriageways alone give no way.
+LINKS = {"motorway_link", "trunk_link"}
+
+# The most of a stretch that may run on slip roads.
+MAX_LINKS_M = 3000.0
+
 # The longest stretch looked for: the Tutor stretches are 2 to 30 km long.
 MAX_SECTION_M = 45_000.0
 
@@ -150,10 +157,9 @@ _LEADING = ("ALLACCIAMENTO ", "ALL ", "NODO ", "VIADOTTO ")
 
 
 def lookup(by_name, name):
-    """The junctions called [name]. When none is called just so: those whose name starts with it or that it starts
-    with, word by word ("SAN DONA" and "San Donà di Piave"); else those whose name holds it, or that it holds, as
-    whole words of two or more letters ("CAMPEGINE" in "Terre di Canossa Campegine", "Corso Malta" in "VIADOTTO
-    CORSO MALTA")."""
+    """The junctions called [name]. When none is called just so, those whose name is near it, word by word: one
+    starting with it, one holding it ("CAMPEGINE" in "Terre di Canossa Campegine"), one it starts with, one it holds
+    ("Corso Malta" in "VIADOTTO CORSO MALTA"), the first kind found."""
     n = norm(NAMES.get(name.strip().upper(), name))
     for lead in _LEADING:
         if n.startswith(lead) and len(n) > len(lead) + 2:
@@ -161,17 +167,21 @@ def lookup(by_name, name):
             break
     if n in by_name:
         return by_name[n]
-    out = []
-    for k, v in by_name.items():
-        if k.startswith(n + " ") or n.startswith(k + " "):
-            out += v
-    if out:
-        return out
     padded = f" {n} "
-    for k, v in by_name.items():
-        if f" {k} ".find(padded) >= 0 or (len(k) >= 6 and padded.find(f" {k} ") >= 0):
-            out += v
-    return out
+    # From the closest to the loosest: a name that goes on ("SAN DONA" and "San Donà di Piave"), one that holds it
+    # ("Castel Maggiore Bologna Interporto"), one it goes on from ("RAVENNA SUD" and "Ravenna", but not "BOLOGNA
+    # INTERPORTO" and "Bologna" while a name holds it whole), one it holds.
+    tiers = (
+        lambda k: k.startswith(n + " "),
+        lambda k: f" {k} ".find(padded) >= 0,
+        lambda k: n.startswith(k + " "),
+        lambda k: len(k) >= 6 and padded.find(f" {k} ") >= 0,
+    )
+    for tier in tiers:
+        out = [x for k, v in by_name.items() if tier(k) for x in v]
+        if out:
+            return out
+    return []
 
 
 # Interchanges the Polizia names by their roads: "ALL A15 A1 N" is where the A15 joins the A1, its northern branch.
@@ -290,7 +300,7 @@ class Roads(osmium.SimpleHandler):
 
     def way(self, w):
         hw = w.tags.get("highway")
-        if hw not in CLASSES:
+        if hw not in CLASSES and hw not in LINKS:
             return
         pts = [(r.ref, r.location.lat, r.location.lon) for r in w.nodes if r.location.valid()]
         if len(pts) < 2 or not any(cell_of(p[1], p[2]) in self.cells for p in pts):
@@ -417,13 +427,27 @@ def between(roads, grid, ps, qs, classes, limit, radius=SNAP_M):
     return length, [x] + [roads.coords[n] for n in path] + [y], [before] + path + [after]
 
 
+def links_m(roads, path):
+    """The metres of [path] on slip roads."""
+    out = 0.0
+    for a, b in zip(path, path[1:]):
+        for m, d, wi in roads.edges.get(a, ()):
+            if m == b:
+                if roads.ways[wi][0] in LINKS:
+                    out += d
+                break
+    return out
+
+
 def limit_along(roads, path):
     """The maxspeed of OSM when the same on every way of [path], else None."""
     seen = set()
     for a, b in zip(path, path[1:]):
         for m, _, wi in roads.edges.get(a, ()):
             if m == b:
-                seen.add(roads.ways[wi][1])
+                # A slip road has its own limit, not the stretch's.
+                if roads.ways[wi][0] not in LINKS:
+                    seen.add(roads.ways[wi][1])
                 break
     if len(seen) == 1:
         v = seen.pop()
@@ -568,15 +592,19 @@ def build(pbf, tutor=None, dgt=None, log=print):
     lost = []
     for _, (da, a, d, note), tries in wanted:
         found = None
-        # The exit is on its carriageway, or on the slip road just off it; else on the other carriageway.
-        for radius in (JUNCTION_M, OTHER_CARRIAGEWAY_M):
+        # The exit is on its carriageway, or on the slip road just off it; else on the other carriageway; else on the
+        # slip roads of an interchange, for a few of the stretch's metres.
+        for classes, radius in ((TUTOR_CLASSES, JUNCTION_M), (TUTOR_CLASSES, OTHER_CARRIAGEWAY_M),
+                                (TUTOR_CLASSES | LINKS, JUNCTION_M)):
             for sa, sb in tries:
-                found = between(roads, grid, sa, sb, TUTOR_CLASSES, MAX_SECTION_M, radius=radius)
-                if found and found[0] >= MIN_SECTION_M:
+                found = between(roads, grid, sa, sb, classes, MAX_SECTION_M, radius=radius)
+                if found and (found[0] < MIN_SECTION_M or links_m(roads, found[2]) > MAX_LINKS_M):
+                    found = None
+                if found:
                     break
-            if found and found[0] >= MIN_SECTION_M:
+            if found:
                 break
-        if not found or found[0] < MIN_SECTION_M:
+        if not found:
             lost.append(f"{da} - {a} ({d})")
             continue
         length, pts, path = found

@@ -324,7 +324,7 @@ jobs:
               && official+=(--france work/radars-fr.json) || echo "::warning::radar francesi non scaricati"
           fi
           if [ "${{ matrix.zone.country }}" = IT ] || [ "${{ matrix.zone.country }}" = ES ]; then
-            osmium tags-filter work/zone.osm.pbf w/highway=motorway,trunk,primary,secondary n/highway=motorway_junction \
+            osmium tags-filter work/zone.osm.pbf w/highway=motorway,trunk,primary,secondary,motorway_link,trunk_link n/highway=motorway_junction \
               -o work/roads.osm.pbf
             official+=(--roads work/roads.osm.pbf)
           fi

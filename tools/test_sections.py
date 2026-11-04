@@ -7,7 +7,7 @@ import tutor_pdf
 
 # A motorway along the parallel 44 with its two carriageways 30 m apart, the northern one going east: exits "Albisola"
 # at 8.40 and "Celle Ligure" at 8.45 on each, "Varazze" at 8.47 on the northern one only. The A12 comes from the north and ends 80 m from it at 8.425, its links
-# left out as in the zones.
+# left out as in the zones. "Rocca" is on the slip road that joins the eastbound carriageway at 8.425.
 OSM = """<?xml version='1.0' encoding='UTF-8'?>
 <osm version="0.6">
   <node id="1" lat="44.0003" lon="8.38"/>
@@ -22,10 +22,12 @@ OSM = """<?xml version='1.0' encoding='UTF-8'?>
   <node id="15" lat="44.0" lon="8.38"/>
   <node id="21" lat="44.03" lon="8.425"/>
   <node id="22" lat="44.0010" lon="8.425"/>
+  <node id="31" lat="44.003" lon="8.435"><tag k="highway" v="motorway_junction"/><tag k="name" v="Rocca"/></node>
   <way id="100"><nd ref="1"/><nd ref="2"/><nd ref="3"/><nd ref="4"/><nd ref="5"/>
     <tag k="highway" v="motorway"/><tag k="ref" v="A10"/><tag k="maxspeed" v="130"/></way>
   <way id="101"><nd ref="11"/><nd ref="12"/><nd ref="13"/><nd ref="14"/><nd ref="15"/>
     <tag k="highway" v="motorway"/><tag k="ref" v="A10"/><tag k="maxspeed" v="130"/></way>
+  <way id="103"><nd ref="31"/><nd ref="3"/><tag k="highway" v="motorway_link"/><tag k="oneway" v="yes"/><tag k="maxspeed" v="60"/></way>
   <way id="102"><nd ref="21"/><nd ref="22"/><tag k="highway" v="motorway"/><tag k="ref" v="A12;E80"/></way>
 </osm>
 """
@@ -90,6 +92,11 @@ class SectionsTest(unittest.TestCase):
         # An interchange by the numbers of its motorways is not a place.
         self.assertEqual(sections.lookup(by, "ALL A15 A1 N"), [])
 
+    def test_lookup_a_name_held_before_a_shorter_one(self):
+        by = {"BOLOGNA": [1], "CASTEL MAGGIORE BOLOGNA INTERPORTO": [2], "RAVENNA": [4]}
+        self.assertEqual(sections.lookup(by, "BOLOGNA INTERPORTO"), [2])
+        self.assertEqual(sections.lookup(by, "RAVENNA SUD"), [4])
+
     def test_polyline(self):
         pts = [(44.1, 8.2), (44.11, 8.21), (-12.3456, -77.0001)]
         self.assertEqual(sections.decode(sections.encode(pts)), pts)
@@ -129,6 +136,14 @@ class SectionsTest(unittest.TestCase):
         self.assertAlmostEqual(rows[0][2], 44.0003)
         self.assertAlmostEqual(rows[0][3], 8.425, places=3)
         self.assertAlmostEqual(int(rows[0][5]["section:m"]), 2002, delta=20)
+
+    def test_tutor_from_a_slip_road(self):
+        rows, _, _ = sections.build(self.osm, tutor=[("ROCCA", "CELLE LIGURE", "EST", "")], log=lambda *_: None)
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows[0][2], 44.003)
+        self.assertAlmostEqual(int(rows[0][5]["section:m"]), 2855, delta=40)
+        # The slip road's limit is not the stretch's.
+        self.assertEqual(rows[0][5]["maxspeed"], "130")
 
     def test_tutor_name_not_found(self):
         rows, _, missing = sections.build(self.osm, tutor=[("ALBISOLA", "SPOTORNO", "OVEST", "")], log=lambda *_: None)
