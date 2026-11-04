@@ -99,6 +99,12 @@ class SectionsTest(unittest.TestCase):
         self.assertEqual(sections.lookup(by, "BOLOGNA INTERPORTO"), [2])
         self.assertEqual(sections.lookup(by, "RAVENNA SUD"), [4])
 
+    def test_lookup_not_a_name_with_two_more_words(self):
+        by = {"SAN GIORGIO": [1], "A4": [2], "ALTEDO": [3]}
+        self.assertEqual(sections.lookup(by, "SAN GIORGIO DI NOGARO"), [])
+        self.assertEqual(sections.lookup(by, "NODO A4/A23"), [])
+        self.assertEqual(sections.lookup(by, "ALTEDO MALALBERGO"), [3])
+
     def test_polyline(self):
         pts = [(44.1, 8.2), (44.11, 8.21), (-12.3456, -77.0001)]
         self.assertEqual(sections.decode(sections.encode(pts)), pts)

@@ -176,11 +176,20 @@ def lookup(by_name, name):
     # From the closest to the loosest: a name that goes on ("SAN DONA" and "San Donà di Piave"), one that holds it
     # ("Castel Maggiore Bologna Interporto"), one it goes on from ("RAVENNA SUD" and "Ravenna", but not "BOLOGNA
     # INTERPORTO" and "Bologna" while a name holds it whole), one it holds.
+    # The last two only for one more word, not a motorway: "SAN GIORGIO DI NOGARO" is not "San Giorgio" (Canavese), nor
+    # "A4 A23" the junction called "A4" by the A26.
+    def one_more(k):
+        rest = n.split()
+        for w in k.split():
+            if w in rest:
+                rest.remove(w)
+        return len(rest) <= 1 and not any(_ROAD.fullmatch(w) for w in rest)
+
     tiers = (
         lambda k: k.startswith(n + " "),
         lambda k: f" {k} ".find(padded) >= 0,
-        lambda k: n.startswith(k + " "),
-        lambda k: len(k) >= 6 and padded.find(f" {k} ") >= 0,
+        lambda k: n.startswith(k + " ") and one_more(k),
+        lambda k: len(k) >= 6 and padded.find(f" {k} ") >= 0 and one_more(k),
     )
     for tier in tiers:
         out = [x for k, v in by_name.items() if tier(k) for x in v]
