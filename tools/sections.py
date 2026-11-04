@@ -155,6 +155,8 @@ def _coords(el):
 # Exits the Polizia calls otherwise than OSM.
 NAMES = {
     "PIACENZA NORD": "BASSO LODIGIANO",
+    # Where the Diramazione Roma Nord joins the A1, its junction called "Roma Nord".
+    "ALL. RACC. ROMA NORD PER A1": "ROMA NORD",
 }
 
 # Words before an exit's name in the Polizia's list: "ALL SAN LAZZARO" is the junction of San Lazzaro.
