@@ -1,0 +1,57 @@
+name: Prova tratti
+
+# Temporary: tries sections.py on all of Italy and Spain and looks at the French radar list. Removed before merging.
+on:
+  push:
+    branches: [claude/project-thread-5d96bd]
+    paths: [".github/workflows/prova-sezioni.yml", "tools/sections.py", "tools/data/**"]
+
+jobs:
+  francia:
+    runs-on: ubuntu-latest
+    steps:
+      - name: The radar datasets of data.gouv.fr
+        run: |
+          for q in radars radars+automatiques "radars+vitesse"; do
+            curl -fsS "https://www.data.gouv.fr/api/1/datasets/?q=$q&page_size=6" | jq -c '.data[] | {slug, title, org: .organization.name, res: [.resources[] | {title, format, url, last_modified}]}'
+          done
+
+  prova:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: italia, extract: europe/italy, args: "--tutor tools/data/tutor.csv" }
+          - { name: spagna, extract: europe/spain, args: "--dgt dgt.xml" }
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool python3-pyosmium
+      - name: Download
+        run: |
+          curl -fsSL --retry 3 -o dgt.xml https://nap.dgt.es/datex2/dgt/PredefinedLocationsPublication/radares/content.xml
+          curl -fsSL --retry 3 -o all.osm.pbf "https://download.geofabrik.de/${{ matrix.extract }}-latest.osm.pbf"
+          osmium tags-filter all.osm.pbf w/highway=motorway,trunk,primary,secondary n/highway=motorway_junction -o roads.osm.pbf
+          rm all.osm.pbf
+          ls -la
+      - name: Sections
+        run: /usr/bin/time -v python3 tools/sections.py roads.osm.pbf tratti.geojson ${{ matrix.args }} 2>&1 | grep -v "^\s*\(Page\|Socket\|Signals\|Swaps\|File system\|Average\|Exit\|Voluntary\|Involuntary\|Minor\|Major\|Percent\|Command\)"
+      - name: Junction names
+        run: |
+          python3 - <<'E'
+          import osmium, sys
+          sys.path.insert(0, "tools")
+          import sections
+          j = sections.Junctions()
+          j.apply_file("roads.osm.pbf")
+          with open("uscite.txt", "w") as f:
+              for k in sorted(j.by_name):
+                  f.write(f"{k}\t{len(j.by_name[k])}\n")
+          print(len(j.by_name), "nomi")
+          E
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tratti-${{ matrix.name }}
+          path: |
+            tratti.geojson
+            uscite.txt
