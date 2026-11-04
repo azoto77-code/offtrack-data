@@ -89,7 +89,7 @@ def merge(points, extra):
                 if _distance_m((e[2], e[3]), (x[2], x[3])) <= MERGE_M]
         if near:
             same = min(near, key=lambda e: _distance_m((e[2], e[3]), (x[2], x[3])))
-            if "maxspeed" not in same[5] and "maxspeed" in x[5] and same[0][0] in "nwr":
+            if "maxspeed" not in same[5] and "maxspeed" in x[5] and not same[0].startswith("mci-"):
                 same[5]["maxspeed"] = x[5]["maxspeed"]
                 lent += 1
             continue

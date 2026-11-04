@@ -5,13 +5,15 @@ The kinds are those of PoiCatalog.kt in the app, matched the same way Overpass.k
 first kind whose tags are all on the element wins, ways and relations stand at the centre of their box, and only
 the tags the app keeps for the card are written. Gates count only where they close a dirt track. Speed cameras are
 kept everywhere: the app lets the user hide them where showing them is forbidden. With --cameras, the speed cameras of
-MapAtlas in that folder are added where OSM has none (cameras.py).
+MapAtlas in that folder are added where OSM has none (cameras.py). With --roads, the official average speed stretches
+(--tutor, --dgt) are placed on its motorways and main roads and the DGT's fixed cameras added (sections.py). With
+--france, the radars of the Sécurité routière are added as MapAtlas's are, with their limits (france.py).
 
 Only the points inside the zone, widened by a few kilometres, are kept: an extract carries whole ferry routes, so
 terminals as far as Tangier come along. The file is poi.json.gz: {"zone", "date", "count", "pois": [[id, kind, lat,
 lon, name, tags]]}, with the same columns as the app's poi table, so the phone loads it as it is.
 
-    poi_zone.py OUT.json.gz AREA.poly IN.osm.pbf [--cameras DIR]
+    poi_zone.py OUT.json.gz AREA.poly IN.osm.pbf [--cameras DIR] [--roads ROADS.osm.pbf --tutor CSV --dgt XML]
 """
 import argparse
 import datetime
@@ -24,6 +26,8 @@ import osmium
 from shapely import contains_xy, prepare
 
 import cameras
+import france
+import sections
 from zone_area import read_poly, widen
 
 # PoiCatalog.kt, in its order: key, tags that must all be there (None = any value), special rule.
@@ -194,6 +198,10 @@ def main():
     p.add_argument("area", type=Path)
     p.add_argument("input", type=Path)
     p.add_argument("--cameras", type=Path, help="folder with MapAtlas <country>.geojson files")
+    p.add_argument("--roads", type=Path, help="motorways and main roads of the zone, with their exits")
+    p.add_argument("--tutor", type=Path, help="the Tutor stretches, tools/data/tutor.csv")
+    p.add_argument("--dgt", type=Path, help="the DGT's DATEX II list of cameras")
+    p.add_argument("--france", type=Path, help="the Sécurité routière's list of radars, /radars/all?_format=json")
     a = p.parse_args()
 
     h = Points()
@@ -202,10 +210,34 @@ def main():
     area = widen(read_poly(a.area))
     points = inside(found, area)
     print(f"{a.input.name}: {len(points)} punti, {len(found) - len(points)} fuori dalla zona lasciati")
+    stretches = []
+    if a.roads and (a.tutor or a.dgt):
+        found, fixed, missing = sections.build(
+            a.roads, sections.tutor_list(a.tutor) if a.tutor else None, a.dgt if a.dgt and a.dgt.exists() else None,
+            log=print)
+        stretches = list(inside({e[0]: e for e in found}, area).values())
+        fixed = inside({e[0]: e for e in fixed}, area)
+        if fixed:
+            added, _ = cameras.merge(points, list(fixed.values()))
+            print(f"  DGT: {len(fixed)} autovelox fissi nella zona, {added} aggiunti")
+        if missing:
+            print(f"  uscite dei Tutor non trovate su OSM: {', '.join(f'{k} ({v})' for k, v in sorted(missing.items()))}")
+    if a.france and a.france.exists():
+        fr = inside({e[0]: e for e in france.load(a.france)}, area)
+        pages = france.add_details(list(fr.values()))
+        added, lent = cameras.merge(points, list(fr.values()))
+        print(f"  Sécurité routière: {len(fr)} radar nella zona ({pages} con la scheda), {added} aggiunti, "
+              f"{lent} limiti dati a quelli di OSM")
     if a.cameras:
         extra = inside({e[0]: e for e in cameras.load(a.cameras)}, area)
         added, lent = cameras.merge(points, list(extra.values()))
-        print(f"  MapAtlas: {len(extra)} autovelox nella zona, {added} aggiunti, {lent} limiti dati a quelli di OSM")
+        print(f"  MapAtlas: {len(extra)} autovelox nella zona, {added} aggiunti, {lent} limiti dati agli altri")
+    if stretches:
+        gone = sections.add(points, stretches)
+        by = {}
+        for e in stretches:
+            by[e[5]["source"]] = by.get(e[5]["source"], 0) + 1
+        print(f"  tratti a velocità media: {', '.join(f'{k} {v}' for k, v in by.items())}; {gone} autovelox al loro inizio sostituiti")
     if h.too_wide:
         print(f"  lasciati fuori perché troppo estesi: {len(h.too_wide)} ({', '.join(h.too_wide[:10])})")
     counts = {}

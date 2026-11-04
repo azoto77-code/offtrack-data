@@ -1,0 +1,79 @@
+name: Elenco Tutor
+
+# Keeps tools/data/tutor.csv, the Tutor stretches of the Polizia di Stato, as the Polizia's page has it: once a month it
+# looks at https://www.poliziadistato.it/articolo/tutor and, when the PDF there is not the one the list was made from,
+# reads it with tools/tutor_pdf.py and proposes the new list as a pull request (or, where the repository does not let
+# the actions open one, an issue with the branch to merge). The zones built after the merge have the new stretches.
+on:
+  schedule:
+    - cron: "0 5 2 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  tutor:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PAGE: https://www.poliziadistato.it/articolo/tutor
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+      - name: The PDF on the page
+        id: pdf
+        run: |
+          curl -fsSL --retry 3 -A OffTrack-data "$PAGE" -o page.html
+          # <a href='/statics/19/elenco-tratti-controllati-con-il-tutor-maggio-2026.pdf' title='ELENCO TRATTI CONTROLLATI con il TUTOR maggio 2026'>
+          link=$(grep -oiE "href=['\"][^'\"]*tutor[^'\"]*\.pdf['\"]" page.html | head -1 | sed -E "s/^href=['\"]//; s/['\"]$//")
+          if [ -z "$link" ]; then echo "::error::Nessun PDF del Tutor su $PAGE"; exit 1; fi
+          case "$link" in http*) url="$link" ;; *) url="https://www.poliziadistato.it$link" ;; esac
+          # The month and year in the file's name: "maggio-2026" -> "maggio 2026".
+          edition=$(basename "$link" .pdf | grep -oE '[a-z]+-[0-9]{4}$' | tr '-' ' ')
+          [ -n "$edition" ] || edition=$(date +%Y-%m-%d)
+          echo "PDF: $url ($edition)"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "edition=$edition" >> "$GITHUB_OUTPUT"
+          if head -1 tools/data/tutor.csv | grep -qF "Polizia di Stato, $edition:"; then
+            echo "L'elenco è già quello di $edition."
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: The new list
+        if: steps.pdf.outputs.new == 'true'
+        env:
+          URL: ${{ steps.pdf.outputs.url }}
+          EDITION: ${{ steps.pdf.outputs.edition }}
+        run: |
+          curl -fsSL --retry 3 -A OffTrack-data "$URL" -o elenco.pdf
+          pdftotext -layout elenco.pdf elenco.txt
+          python3 tools/tutor_pdf.py elenco.txt tools/data/tutor.csv "$EDITION"
+          # A PDF laid out otherwise reads badly: the list has about two hundred stretches.
+          n=$(($(wc -l < tools/data/tutor.csv) - 2))
+          if [ "$n" -lt 100 ]; then echo "::error::Solo $n tratti letti dal PDF: tutor_pdf.py va adattato"; exit 1; fi
+          git diff --stat
+      - name: The pull request
+        if: steps.pdf.outputs.new == 'true'
+        env:
+          URL: ${{ steps.pdf.outputs.url }}
+          EDITION: ${{ steps.pdf.outputs.edition }}
+        run: |
+          if git diff --quiet; then echo "Stessi tratti, nessuna modifica."; exit 0; fi
+          branch="tutor-$(echo "$EDITION" | tr ' ' '-')"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898729+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git commit -qam "Elenco Tutor della Polizia di Stato, $EDITION"
+          git push -f origin "$branch"
+          body=$(printf 'Nuovo elenco dei tratti controllati dal Tutor, dal [PDF della Polizia di Stato](%s) (%s), letto con `tools/tutor_pdf.py`.\n\nDa controllare prima di unire: il numero di tratti e qualche riga a caso contro il PDF. Le zone costruite dopo avranno i tratti nuovi.' "$URL" "$EDITION")
+          if gh pr view "$branch" --json state --jq .state 2>/dev/null | grep -q OPEN; then
+            echo "La pull request è già aperta."
+          elif ! gh pr create --head "$branch" --title "Elenco Tutor $EDITION" --body "$body"; then
+            # The repository does not let the actions open pull requests: an issue says where the branch is.
+            gh issue create --title "Elenco Tutor $EDITION da unire" \
+              --body "$body"$'\n\n'"Ramo: [$branch](https://github.com/${{ github.repository }}/compare/$branch?expand=1)"
+          fi
