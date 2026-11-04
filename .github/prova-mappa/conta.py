@@ -81,9 +81,11 @@ def summary(feats, metres_per_tile):
             s[f"strade: {kind} km"] += g.length * m / 1000
         if layer in ("roads", "transportation_name") and p.get("name"):
             names["strade con nome"].add(p["name"])
-        if layer in ("buildings", "building") and g.geom_type in ("Polygon", "MultiPolygon"):
-            s["edifici: ettari"] += g.area * m * m / 10000
-            s["edifici: poligoni"] += len(polygons_of(g))
+        if layer in ("buildings", "building"):
+            # A mended polygon can come back as a collection: its polygons count all the same.
+            parts = polygons_of(g)
+            s["edifici: ettari"] += sum(p.area for p in parts) * m * m / 10000
+            s["edifici: poligoni"] += len(parts)
         if (p.get("addr_housenumber") or p.get("housenumber")) and g.geom_type == "Point":
             s["civici"] += 1
         if layer in ("pois", "poi"):
