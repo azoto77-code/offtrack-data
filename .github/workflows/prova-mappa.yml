@@ -58,9 +58,17 @@ jobs:
             | sed -E 's#^https://tiles.openfreemap.org/planet/([^/]+)/.*#https://btrfs.openfreemap.com/areas/planet/\1/tiles.pmtiles#')
           echo "Protomaps: $pm"
           echo "OpenFreeMap: $ofm"
-          pmtiles-cli/pmtiles extract "$pm" out/protomaps-z15.pmtiles --region=area.geojson --maxzoom=15 --download-threads=8
-          pmtiles-cli/pmtiles extract "$pm" out/protomaps-z14.pmtiles --region=area.geojson --maxzoom=14 --download-threads=8
-          pmtiles-cli/pmtiles extract "$ofm" out/openfreemap-z14.pmtiles --region=area.geojson --maxzoom=14 --download-threads=8
+          # OpenFreeMap's server sometimes drops the connection (4 November): a few tries each.
+          extract() {
+            for try in 1 2 3; do
+              pmtiles-cli/pmtiles extract "$1" "$2" --region=area.geojson --maxzoom="$3" --download-threads=8 && return 0
+              sleep 20
+            done
+            return 1
+          }
+          extract "$pm" out/protomaps-z15.pmtiles 15
+          extract "$pm" out/protomaps-z14.pmtiles 14
+          extract "$ofm" out/openfreemap-z14.pmtiles 14
 
       - name: Compare
         run: |
