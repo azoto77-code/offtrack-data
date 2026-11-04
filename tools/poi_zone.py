@@ -4,13 +4,14 @@
 The kinds are those of PoiCatalog.kt in the app, matched the same way Overpass.kt reads an Overpass answer: the
 first kind whose tags are all on the element wins, ways and relations stand at the centre of their box, and only
 the tags the app keeps for the card are written. Gates count only where they close a dirt track. Speed cameras are
-kept everywhere: the app lets the user hide them where showing them is forbidden.
+kept everywhere: the app lets the user hide them where showing them is forbidden. With --cameras, the speed cameras of
+MapAtlas in that folder are added where OSM has none (cameras.py).
 
 Only the points inside the zone, widened by a few kilometres, are kept: an extract carries whole ferry routes, so
 terminals as far as Tangier come along. The file is poi.json.gz: {"zone", "date", "count", "pois": [[id, kind, lat,
 lon, name, tags]]}, with the same columns as the app's poi table, so the phone loads it as it is.
 
-    poi_zone.py OUT.json.gz AREA.poly IN.osm.pbf
+    poi_zone.py OUT.json.gz AREA.poly IN.osm.pbf [--cameras DIR]
 """
 import argparse
 import datetime
@@ -22,6 +23,7 @@ import numpy as np
 import osmium
 from shapely import contains_xy, prepare
 
+import cameras
 from zone_area import read_poly, widen
 
 # PoiCatalog.kt, in its order: key, tags that must all be there (None = any value), special rule.
@@ -191,13 +193,19 @@ def main():
     p.add_argument("out", type=Path)
     p.add_argument("area", type=Path)
     p.add_argument("input", type=Path)
+    p.add_argument("--cameras", type=Path, help="folder with MapAtlas <country>.geojson files")
     a = p.parse_args()
 
     h = Points()
     h.apply_file(str(a.input), locations=True, idx="flex_mem")
     found = h.points()
-    points = inside(found, widen(read_poly(a.area)))
+    area = widen(read_poly(a.area))
+    points = inside(found, area)
     print(f"{a.input.name}: {len(points)} punti, {len(found) - len(points)} fuori dalla zona lasciati")
+    if a.cameras:
+        extra = inside({e[0]: e for e in cameras.load(a.cameras)}, area)
+        added, lent = cameras.merge(points, list(extra.values()))
+        print(f"  MapAtlas: {len(extra)} autovelox nella zona, {added} aggiunti, {lent} limiti dati a quelli di OSM")
     if h.too_wide:
         print(f"  lasciati fuori perché troppo estesi: {len(h.too_wide)} ({', '.join(h.too_wide[:10])})")
     counts = {}
