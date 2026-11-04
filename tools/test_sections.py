@@ -6,7 +6,7 @@ import sections
 import tutor_pdf
 
 # A motorway along the parallel 44 with its two carriageways 30 m apart, the northern one going east: exits "Albisola"
-# at 8.40 and "Celle Ligure" at 8.45 on each. The A12 comes from the north and ends 80 m from it at 8.425, its links
+# at 8.40 and "Celle Ligure" at 8.45 on each, "Varazze" at 8.47 on the northern one only. The A12 comes from the north and ends 80 m from it at 8.425, its links
 # left out as in the zones.
 OSM = """<?xml version='1.0' encoding='UTF-8'?>
 <osm version="0.6">
@@ -14,7 +14,7 @@ OSM = """<?xml version='1.0' encoding='UTF-8'?>
   <node id="2" lat="44.0003" lon="8.40"><tag k="highway" v="motorway_junction"/><tag k="name" v="Albisola"/></node>
   <node id="3" lat="44.0003" lon="8.425"/>
   <node id="4" lat="44.0003" lon="8.45"><tag k="highway" v="motorway_junction"/><tag k="name" v="Celle Ligure"/></node>
-  <node id="5" lat="44.0003" lon="8.47"/>
+  <node id="5" lat="44.0003" lon="8.47"><tag k="highway" v="motorway_junction"/><tag k="name" v="Varazze"/></node>
   <node id="11" lat="44.0" lon="8.47"/>
   <node id="12" lat="44.0" lon="8.45"><tag k="highway" v="motorway_junction"/><tag k="name" v="Celle Ligure"/></node>
   <node id="13" lat="44.0" lon="8.425"/>
@@ -131,9 +131,17 @@ class SectionsTest(unittest.TestCase):
         self.assertAlmostEqual(int(rows[0][5]["section:m"]), 2002, delta=20)
 
     def test_tutor_name_not_found(self):
-        rows, _, missing = sections.build(self.osm, tutor=[("ALBISOLA", "VARAZZE", "OVEST", "")], log=lambda *_: None)
+        rows, _, missing = sections.build(self.osm, tutor=[("ALBISOLA", "SPOTORNO", "OVEST", "")], log=lambda *_: None)
         self.assertEqual(rows, [])
-        self.assertEqual(missing, {"VARAZZE": 1})
+        self.assertEqual(missing, {"SPOTORNO": 1})
+
+    def test_tutor_from_the_other_carriageway(self):
+        # Westwards from Varazze, mapped on the eastbound carriageway only: the stretch starts across from it.
+        rows, _, _ = sections.build(self.osm, tutor=[("VARAZZE", "CELLE LIGURE", "OVEST", "")], log=lambda *_: None)
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows[0][2], 44.0)
+        self.assertAlmostEqual(rows[0][3], 8.47, places=3)
+        self.assertAlmostEqual(int(rows[0][5]["section:m"]), 1602, delta=20)
 
     def test_dgt(self):
         xml = os.path.join(self.dir.name, "dgt.xml")

@@ -37,6 +37,10 @@ SNAP_M = 80.0
 # How far from an exit's junction its carriageway may be: less than the gap to the other carriageway.
 JUNCTION_M = 25.0
 
+# How far the other carriageway may be: OSM often has an exit's junction on one carriageway only, and the stretch
+# going the other way starts from the carriageway across from it.
+OTHER_CARRIAGEWAY_M = 200.0
+
 # A stretch shorter than this is two names of the same exit.
 MIN_SECTION_M = 500.0
 
@@ -564,9 +568,12 @@ def build(pbf, tutor=None, dgt=None, log=print):
     lost = []
     for _, (da, a, d, note), tries in wanted:
         found = None
-        for sa, sb in tries:
-            # The exit is on its carriageway, or on the slip road just off it.
-            found = between(roads, grid, sa, sb, TUTOR_CLASSES, MAX_SECTION_M, radius=JUNCTION_M)
+        # The exit is on its carriageway, or on the slip road just off it; else on the other carriageway.
+        for radius in (JUNCTION_M, OTHER_CARRIAGEWAY_M):
+            for sa, sb in tries:
+                found = between(roads, grid, sa, sb, TUTOR_CLASSES, MAX_SECTION_M, radius=radius)
+                if found and found[0] >= MIN_SECTION_M:
+                    break
             if found and found[0] >= MIN_SECTION_M:
                 break
         if not found or found[0] < MIN_SECTION_M:
