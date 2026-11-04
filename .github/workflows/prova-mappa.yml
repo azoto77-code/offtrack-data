@@ -1,12 +1,18 @@
 name: Prova mappa OpenFreeMap
 # A trial, not to be merged: cuts the OpenFreeMap world file of the week next to the Protomaps one of the day for a
 # few zones, as "Cut the map" of zone.yml does, to compare their weight. Protomaps is cut both to zoom 15, as in the
-# zones, and to zoom 14, where OpenFreeMap stops. The files are kept as artifacts; nothing is published.
+# zones, and to zoom 14, where OpenFreeMap stops. The files are kept as artifacts; nothing is published. For a few
+# places, prova-mappa/conta.py counts what each file keeps and draws it; tables and drawings are committed to the
+# pull request's branch under prova-mappa/anteprime/.
 on:
   pull_request:
     paths:
       - ".github/workflows/prova-mappa.yml"
+      - ".github/prova-mappa/**"
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   mappa:
@@ -15,8 +21,10 @@ jobs:
       fail-fast: false
       matrix:
         zone:
-          - {id: nord-ovest, geofabrik: europe/italy/nord-ovest}
-          - {id: corsica, geofabrik: europe/france/corse}
+          - {id: nord-ovest, geofabrik: europe/italy/nord-ovest,
+             places: "44.4075 8.9340 genova-centro 44.1906 8.1318 bardineto 45.0705 7.0545 colle-delle-finestre"}
+          - {id: corsica, geofabrik: europe/france/corse,
+             places: "41.9193 8.7386 ajaccio-centro 41.7497 9.1713 zonza"}
     env:
       ID: ${{ matrix.zone.id }}
     steps:
@@ -28,7 +36,8 @@ jobs:
         run: |
           sudo rm -f /var/lib/man-db/auto-update
           sudo apt-get update -qq
-          sudo apt-get install -y -qq python3-shapely
+          sudo apt-get install -y -qq python3-shapely python3-matplotlib
+          pip install --quiet --break-system-packages pmtiles mapbox-vector-tile
           gh release download --repo protomaps/go-pmtiles --pattern '*_Linux_x86_64.tar.gz' -D pmtiles-cli
           tar -xzf pmtiles-cli/*.tar.gz -C pmtiles-cli
 
@@ -64,6 +73,33 @@ jobs:
             done
           } | tee -a "$GITHUB_STEP_SUMMARY"
           for f in out/*.pmtiles; do echo "== $f"; pmtiles-cli/pmtiles show "$f" | head -20; done
+
+      - name: Count and draw what each file keeps
+        run: |
+          python3 .github/prova-mappa/conta.py out "anteprime/$ID" ${{ matrix.zone.places }} | tee "anteprime-$ID.md"
+          mv "anteprime-$ID.md" "anteprime/$ID/conteggi.md"
+          cat "anteprime/$ID/conteggi.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit the drawings to the branch
+        if: github.event_name == 'pull_request'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mv anteprime "$RUNNER_TEMP/anteprime"
+          git fetch -q origin "$GITHUB_HEAD_REF"
+          git checkout -q -B prova "origin/$GITHUB_HEAD_REF"
+          for attempt in 1 2 3 4 5; do
+            mkdir -p prova-mappa/anteprime
+            rm -rf "prova-mappa/anteprime/$ID"
+            cp -r "$RUNNER_TEMP/anteprime/$ID" prova-mappa/anteprime/
+            git add prova-mappa/anteprime
+            git commit -q -m "Trial previews of the maps for $ID" || exit 0
+            git push -q origin "HEAD:$GITHUB_HEAD_REF" && exit 0
+            # The other zone pushed first: start again from its commit.
+            git fetch -q origin "$GITHUB_HEAD_REF"
+            git reset -q --hard "origin/$GITHUB_HEAD_REF"
+          done
+          exit 1
 
       - name: Keep the files
         uses: actions/upload-artifact@v4
