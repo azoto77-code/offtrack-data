@@ -152,6 +152,12 @@ class SectionsTest(unittest.TestCase):
         rows, _, _ = sections.build(self.osm, tutor=[("ROCCA", "ALBISOLA", "OVEST", "")], log=lambda *_: None)
         self.assertEqual(rows, [])
 
+    def test_no_way_much_longer_than_the_straight_line(self):
+        # 10 km between ends 2 km apart is a way that turns back somewhere, on any road.
+        line = [(44.0, 8.40), (44.09, 8.40), (44.0, 8.4258)]
+        self.assertFalse(sections.plausible(None, (20000.0, line, [])))
+        self.assertTrue(sections.plausible(None, (4000.0, [(44.0, 8.40), (44.0, 8.4258)], [])))
+
     def test_tutor_name_not_found(self):
         rows, _, missing = sections.build(self.osm, tutor=[("ALBISOLA", "SPOTORNO", "OVEST", "")], log=lambda *_: None)
         self.assertEqual(rows, [])

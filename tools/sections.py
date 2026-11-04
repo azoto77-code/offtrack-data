@@ -32,10 +32,13 @@ TUTOR_CLASSES = {"motorway", "trunk"}
 # interchange ("Villesse" on the ramp to the A34), and only when the carriageways alone give no way.
 LINKS = {"motorway_link", "trunk_link"}
 
-# The most of a stretch that may run on slip roads; and how much longer than the straight line it may be then, as slip
-# roads can turn back at an interchange: a motorway is seldom a third longer.
+# The most of a stretch that may run on slip roads.
 MAX_LINKS_M = 3000.0
-LINKS_DETOUR = 1.5
+
+# How much longer than the straight line a stretch may be: a motorway is seldom a third longer, while a way that turns
+# back at an interchange (an end mapped on the carriageway the other way, or on the other road of the interchange) is
+# two or three times longer.
+DETOUR = 1.5
 
 # The longest stretch looked for: the Tutor stretches are 2 to 30 km long.
 MAX_SECTION_M = 45_000.0
@@ -429,10 +432,12 @@ def between(roads, grid, ps, qs, classes, limit, radius=SNAP_M):
     return length, [x] + [roads.coords[n] for n in path] + [y], [before] + path + [after]
 
 
-def plausible(roads, found):
-    """Whether a way found over slip roads keeps to them for a few metres and does not turn back."""
+def plausible(roads, found, links=False):
+    """Whether a way found does not turn back, and keeps to the slip roads for a few metres when it may use them."""
     length, pts, path = found
-    return links_m(roads, path) <= MAX_LINKS_M and length <= distance_m(pts[0], pts[-1]) * LINKS_DETOUR + 1000
+    if length > distance_m(pts[0], pts[-1]) * DETOUR + 1000:
+        return False
+    return not links or links_m(roads, path) <= MAX_LINKS_M
 
 
 def links_m(roads, path):
@@ -606,7 +611,7 @@ def build(pbf, tutor=None, dgt=None, log=print):
                                 (TUTOR_CLASSES | LINKS, JUNCTION_M)):
             for sa, sb in tries:
                 found = between(roads, grid, sa, sb, classes, MAX_SECTION_M, radius=radius)
-                if found and (found[0] < MIN_SECTION_M or (classes & LINKS and not plausible(roads, found))):
+                if found and (found[0] < MIN_SECTION_M or not plausible(roads, found, bool(classes & LINKS))):
                     found = None
                 if found:
                     break
