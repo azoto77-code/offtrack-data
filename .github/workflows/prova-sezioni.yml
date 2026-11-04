@@ -22,10 +22,63 @@ jobs:
           curl -fsSL --retry 3 -o dgt.xml https://nap.dgt.es/datex2/dgt/PredefinedLocationsPublication/radares/content.xml
           curl -fsSL --retry 3 -o all.osm.pbf "https://download.geofabrik.de/${{ matrix.extract }}-latest.osm.pbf"
           osmium tags-filter all.osm.pbf w/highway=motorway,trunk,primary,secondary n/highway=motorway_junction -o roads.osm.pbf
+          osmium tags-filter all.osm.pbf w/highway=motorway,trunk,motorway_link,trunk_link,construction,proposed n/highway=motorway_junction -o wide.osm.pbf
           rm all.osm.pbf
           ls -la
       - name: Sections
         run: /usr/bin/time -v python3 tools/sections.py roads.osm.pbf tratti.geojson ${{ matrix.args }} 2>&1 | grep -v "^\s*\(Page\|Socket\|Signals\|Swaps\|File system\|Average\|Exit\|Voluntary\|Involuntary\|Minor\|Major\|Percent\|Command\)"
+      - name: Why some stretches have no road
+        run: |
+          python3 - <<'P'
+          import sys
+          sys.path.insert(0, "tools")
+          import sections as S
+          lost = [("VILLESSE", "PALMANOVA"), ("SAN GIORGIO DI NOGARO", "NODO A4/A23"), ("VILLESSE", "REDIPUGLIA"),
+                  ("GROPELLO", "BEREGUARDO"), ("BOLOGNA INTERPORTO", "ALTEDO"), ("ALTEDO", "BOLOGNA INTERPORTO"),
+                  ("UDINE SUD", "NODO A23-A4"), ("SALERNO SAN SEVERINO", "NOCERA PAGANI"), ("ARENELLA", "CAPODIMONTE")]
+          j = S.Junctions(); j.apply_file("wide.osm.pbf")
+          pairs = {S.interchange(n) for p in lost for n in p} - {None}
+          places = S.interchanges("wide.osm.pbf", pairs) if pairs else {}
+          ALL = {"motorway", "trunk", "motorway_link", "trunk_link", "construction", "proposed"}
+          S.CLASSES = ALL
+          cells, ends = set(), []
+          for da, a in lost:
+              sa = places.get(S.interchange(da)) or S.lookup(j.by_name, da)
+              sb = places.get(S.interchange(a)) or S.lookup(j.by_name, a)
+              print(da, "->", a, ":", len(sa), "e", len(sb), "svincoli", [(round(x[1], 4), round(x[2], 4)) for x in sa][:4], [(round(y[1], 4), round(y[2], 4)) for y in sb][:4])
+              ends.append((da, a, [x[1:] for x in sa], [y[1:] for y in sb]))
+              for x in sa:
+                  for y in sb:
+                      if S.distance_m(x[1:], y[1:]) < 45000:
+                          cells |= S.cells_around(x[1:], y[1:])
+          import osmium
+          class R(S.Roads):
+              def __init__(self, cells):
+                  super().__init__(cells); self.tags = []
+              def way(self, w):
+                  n = len(self.ways); super().way(w)
+                  if len(self.ways) > n:
+                      self.tags.append((w.id, dict(w.tags)))
+          roads = R(cells); roads.apply_file("wide.osm.pbf", locations=True, idx="flex_mem")
+          grid = S.segment_grid(roads)
+          for da, a, sa, sb in ends:
+              for radius in (25, 200):
+                  f = S.between(roads, grid, sa, sb, ALL, 45000, radius=radius)
+                  if f:
+                      break
+              if not f:
+                  print(" ", da, "->", a, ": nessuna strada nemmeno con rampe e cantieri"); continue
+              length, pts, path = f
+              odd = {}
+              for u, v in zip(path, path[1:]):
+                  for m, _, wi in roads.edges.get(u, ()):
+                      if m == v:
+                          wid, t = roads.tags[wi]
+                          if t.get("highway") not in ("motorway", "trunk"):
+                              odd[wid] = {k: t[k] for k in ("highway", "construction", "ref", "name", "oneway") if k in t}
+                          break
+              print(" ", da, "->", a, f": {round(length)} m con raggio {radius}; vie non autostrada:", odd or "nessuna")
+          P
       - uses: actions/upload-artifact@v4
         with:
           name: tratti-${{ matrix.name }}
