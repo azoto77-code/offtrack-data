@@ -41,6 +41,24 @@ jobs:
           for r in sorted(out, reverse=True)[:12]:
               print(round(r[0], 2), r[1:])
           X
+      - name: Where San Giorgio and the A4/A23 are
+        run: |
+          python3 - <<'X'
+          import json, sys
+          sys.path.insert(0, "tools")
+          import sections as S
+          for f in json.load(open("tratti.geojson"))["features"]:
+              if "Nogaro" in f["properties"]["name"]:
+                  c = f["geometry"]["coordinates"]
+                  print("tratto da", c[0][::-1], "a", c[-1][::-1], len(c), "punti")
+          j = S.Junctions(); j.apply_file("roads.osm.pbf")
+          for n in ("SAN GIORGIO DI NOGARO", "NODO A4/A23", "PALMANOVA", "UDINE SUD", "NODO A23-A4"):
+              print(n, [(x[0], round(x[1], 4), round(x[2], 4)) for x in S.lookup(j.by_name, n)])
+          pairs = {S.interchange("NODO A4/A23"), S.interchange("NODO A23-A4")} - {None}
+          print(pairs)
+          for k, v in S.interchanges("roads.osm.pbf", pairs).items():
+              print(k, [(x[0], round(x[1], 4), round(x[2], 4)) for x in v])
+          X
       - uses: actions/upload-artifact@v4
         with:
           name: tratti-${{ matrix.name }}
