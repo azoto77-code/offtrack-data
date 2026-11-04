@@ -1,0 +1,36 @@
+name: Prova radar francesi
+
+# Temporary: looks at the official list of the French radars. Removed before merging.
+on:
+  push:
+    branches: [claude/project-thread-5d96bd]
+    paths: [".github/workflows/prova-francia.yml"]
+
+jobs:
+  francia:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sécurité routière
+        run: |
+          curl -sSL -A "Mozilla/5.0" -o all.json -w "%{http_code} %{content_type} %{size_download}\n" "https://radars.securite-routiere.gouv.fr/radars/all?_format=json" || true
+          head -c 1500 all.json; echo
+          python3 - <<'P' || true
+          import json, collections
+          d = json.load(open("all.json"))
+          print(type(d), len(d))
+          items = d if isinstance(d, list) else next(v for v in d.values() if isinstance(v, list))
+          print(json.dumps(items[:3], ensure_ascii=False, indent=1)[:3000])
+          for k in ("type", "radarType", "typeLabel"):
+              c = collections.Counter(str(i.get(k)) for i in items)
+              if len(c) > 1: print(k, c.most_common(20))
+          P
+          id=$(python3 -c "import json;d=json.load(open('all.json'));items=d if isinstance(d,list) else next(v for v in d.values() if isinstance(v,list));print(next((i.get('id') for i in items if 'ron' in json.dumps(i, ensure_ascii=False)), items[0].get('id')))" 2>/dev/null)
+          echo "radar $id"
+          curl -sSL -A "Mozilla/5.0" "https://radars.securite-routiere.gouv.fr/radars/$id?_format=json" | head -c 3000; echo
+      - name: data.gouv.fr, organisation Sécurité routière
+        run: |
+          curl -fsS "https://www.data.gouv.fr/api/1/organizations/?q=securite+routiere&page_size=5" | jq -c '.data[] | {id, slug, name}'
+          curl -fsS "https://www.data.gouv.fr/api/1/datasets/?q=radar+troncon&page_size=5" | jq -c '.data[] | {slug, title, org: .organization.name}'
+      - name: The community list on GitHub
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/AntoineAugusti/radars-france/master/README.md | head -60 || true
