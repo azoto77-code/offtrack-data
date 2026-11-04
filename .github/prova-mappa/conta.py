@@ -18,6 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from shapely import affinity
 from shapely.geometry import box, shape
+from shapely.validation import make_valid
 
 RADIUS = 1  # tiles of zoom 15 on each side of the place's own
 
@@ -50,6 +51,8 @@ def features(reader, maxzoom, x15, y15, dx, dy):
         extent = layer.get("extent", 4096)
         for f in layer["features"]:
             g = shape(f["geometry"])
+            if not g.is_valid:
+                g = make_valid(g)
             if maxzoom < 15:
                 half = extent / 2
                 ox, oy = x15 % 2, y15 % 2

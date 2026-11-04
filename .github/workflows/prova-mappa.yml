@@ -76,6 +76,7 @@ jobs:
 
       - name: Count and draw what each file keeps
         run: |
+          set -o pipefail
           python3 .github/prova-mappa/conta.py out "anteprime/$ID" ${{ matrix.zone.places }} | tee "anteprime-$ID.md"
           mv "anteprime-$ID.md" "anteprime/$ID/conteggi.md"
           cat "anteprime/$ID/conteggi.md" >> "$GITHUB_STEP_SUMMARY"
