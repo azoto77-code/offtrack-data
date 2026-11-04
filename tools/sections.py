@@ -34,6 +34,12 @@ MAX_SECTION_M = 45_000.0
 # How far from a DGT end its road may be.
 SNAP_M = 80.0
 
+# How far from an exit's junction its carriageway may be: less than the gap to the other carriageway.
+JUNCTION_M = 25.0
+
+# A stretch shorter than this is two names of the same exit.
+MIN_SECTION_M = 500.0
+
 # The cells of the grid that tells which ways to read, in degrees: about 5 km.
 CELL = 0.05
 
@@ -243,27 +249,29 @@ def shortest(roads, starts, ends, classes, limit=MAX_SECTION_M):
 
 
 def segment_grid(roads):
-    """The directed segments of [roads] by the cells they cross: cell -> [(a, b)]."""
+    """The directed segments of [roads] by the cells they cross: cell -> [(a, b, way index)]."""
     grid = {}
     for a, out in roads.edges.items():
         pa = roads.coords[a]
-        for b, d, _ in out:
+        for b, d, wi in out:
             pb = roads.coords[b]
             steps = max(1, int(d // 1000))
             cells = {cell_of(pa[0] + (pb[0] - pa[0]) * i / steps, pa[1] + (pb[1] - pa[1]) * i / steps) for i in range(steps + 1)}
             for c in cells:
-                grid.setdefault(c, []).append((a, b))
+                grid.setdefault(c, []).append((a, b, wi))
     return grid
 
 
-def snap(roads, grid, p, radius):
-    """The segments within [radius] of [p]: [(a, b, point on the segment nearest to p)]."""
+def snap(roads, grid, p, radius, classes=CLASSES):
+    """The segments of ways of [classes] within [radius] of [p]: [(a, b, point on the segment nearest to p)]."""
     cy, cx = cell_of(*p)
     k = math.cos(math.radians(p[0]))
     out = []
     for dy in (-1, 0, 1):
         for dx in (-1, 0, 1):
-            for a, b in grid.get((cy + dy, cx + dx), ()):
+            for a, b, wi in grid.get((cy + dy, cx + dx), ()):
+                if roads.ways[wi][0] not in classes:
+                    continue
                 (la, oa), (lb, ob) = roads.coords[a], roads.coords[b]
                 ax, ay = (oa - p[1]) * 111_320 * k, (la - p[0]) * 110_540
                 bx, by = (ob - p[1]) * 111_320 * k, (lb - p[0]) * 110_540
@@ -275,24 +283,29 @@ def snap(roads, grid, p, radius):
     return out
 
 
-def between(roads, grid, p, q, classes, limit):
-    """The shortest way from the road at [p] to the road at [q]: (metres, [(lat, lon)], [node ids]) or None."""
+def between(roads, grid, ps, qs, classes, limit, radius=SNAP_M):
+    """The shortest way from the road at one of the points [ps] to the road at one of [qs], on ways of [classes]:
+    (metres, [(lat, lon)], [node ids]) or None."""
     starts, ends, first, last = {}, {}, {}, {}
-    for a, b, x in snap(roads, grid, p, SNAP_M):
-        d = distance_m(x, roads.coords[b])
-        if d < starts.get(b, math.inf):
-            starts[b], first[b] = d, x
-    for a, b, x in snap(roads, grid, q, SNAP_M):
-        d = distance_m(roads.coords[a], x)
-        if d < ends.get(a, math.inf):
-            ends[a], last[a] = d, x
+    for p in ps:
+        for a, b, x in snap(roads, grid, p, radius, classes):
+            d = distance_m(x, roads.coords[b])
+            if d < starts.get(b, math.inf):
+                starts[b], first[b] = d, (x, a)
+    for q in qs:
+        for a, b, x in snap(roads, grid, q, radius, classes):
+            d = distance_m(roads.coords[a], x)
+            if d < ends.get(a, math.inf):
+                ends[a], last[a] = d, (x, b)
     if not starts or not ends:
         return None
     found = shortest(roads, starts, ends, classes, limit)
     if not found:
         return None
     length, path = found
-    return length, [first[path[0]]] + [roads.coords[n] for n in path] + [last[path[-1]]], path
+    (x, before), (y, after) = first[path[0]], last[path[-1]]
+    # The nodes with the two segments the ends fall on, for their ways' limits; the line from the ends themselves.
+    return length, [x] + [roads.coords[n] for n in path] + [y], [before] + path + [after]
 
 
 def limit_along(roads, path):
@@ -409,6 +422,8 @@ def build(pbf, tutor=None, dgt=None, log=print):
     missing = {}
     for da, a, d, note in tutor or []:
         sa, sb = lookup(j.by_name, da), lookup(j.by_name, a)
+        # "ROVIGO" found only as "Rovigo Sud", the other end: not the same exit twice.
+        sa, sb = [x for x in sa if x not in sb], [y for y in sb if y not in sa]
         if not sa or not sb:
             if sa or sb:
                 # One end is in the zone: the name of the other is not on OSM as written.
@@ -419,7 +434,7 @@ def build(pbf, tutor=None, dgt=None, log=print):
         pairs = [(x, y) for x in sa for y in sb if distance_m(x[1:], y[1:]) <= MAX_SECTION_M]
         if not pairs:
             continue
-        wanted.append(("tutor", (da, a, d, note), [x[0] for x in sa], [y[0] for y in sb]))
+        wanted.append(("tutor", (da, a, d, note), [x[1:] for x in sa], [y[1:] for y in sb]))
         for x, y in pairs:
             cells |= cells_around(x[1:], y[1:])
     dgt_sections, dgt_fixed = dgt_list(dgt) if dgt else ([], [])
@@ -430,21 +445,20 @@ def build(pbf, tutor=None, dgt=None, log=print):
                      {"camera:type": "fixed", "source": DGT}) for i, _, lat, lon in dgt_fixed], missing
     roads = Roads(cells)
     roads.apply_file(str(pbf), locations=True, idx="flex_mem")
-    grid = segment_grid(roads) if dgt_sections else {}
+    grid = segment_grid(roads)
     out = []
     lost = []
     for _, (da, a, d, note), sa, sb in wanted:
-        sa = [n for n in sa if n in roads.edges or n in roads.coords]
-        sb = [n for n in sb if n in roads.coords]
-        found = shortest(roads, sa, sb, TUTOR_CLASSES) if sa and sb else None
-        if not found:
+        # The exit is on its carriageway, or on the slip road just off it.
+        found = between(roads, grid, sa, sb, TUTOR_CLASSES, MAX_SECTION_M, radius=JUNCTION_M)
+        if not found or found[0] < MIN_SECTION_M:
             lost.append(f"{da} - {a} ({d})")
             continue
-        length, path = found
+        length, pts, path = found
         name = f"{da.title()} - {a.title()}"
-        out.append(row(f"tutor-{slug(da, a, d)}", name, POLIZIA, roads, length, path))
+        out.append(row(f"tutor-{slug(da, a, d)}", name, POLIZIA, roads, length, path, pts=pts))
     for sid, road, p, q in dgt_sections:
-        found = between(roads, grid, p, q, CLASSES, limit=distance_m(p, q) * 2 + 2000)
+        found = between(roads, grid, [p], [q], CLASSES, limit=distance_m(p, q) * 2 + 2000)
         if not found:
             if snap(roads, grid, p, SNAP_M) or snap(roads, grid, q, SNAP_M):
                 lost.append(f"DGT {sid} {road}")
