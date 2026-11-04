@@ -74,6 +74,18 @@ class SectionsTest(unittest.TestCase):
         self.assertEqual(sections.lookup(by, "SAN DONA'"), [1])
         self.assertEqual(sections.lookup(by, "ROVIGO"), [2])
 
+    def test_lookup_other_names(self):
+        by = {"TERRE DI CANOSSA CAMPEGINE": [1], "CORSO MALTA": [2], "SAN LAZZARO": [3], "RAVENNA": [4],
+              "BASSO LODIGIANO": [5], "BARI": [6], "BARI NORD": [7]}
+        self.assertEqual(sections.lookup(by, "CAMPEGINE"), [1])
+        self.assertEqual(sections.lookup(by, "VIADOTTO CORSO MALTA"), [2])
+        self.assertEqual(sections.lookup(by, "ALL SAN LAZZARO"), [3])
+        self.assertEqual(sections.lookup(by, "ALL. RAVENNA SUD"), [4])
+        self.assertEqual(sections.lookup(by, "PIACENZA NORD"), [5])
+        self.assertEqual(sections.lookup(by, "BARI NORD"), [7])
+        # An interchange by the numbers of its motorways is not a place.
+        self.assertEqual(sections.lookup(by, "ALL A15 A1 N"), [])
+
     def test_polyline(self):
         pts = [(44.1, 8.2), (44.11, 8.21), (-12.3456, -77.0001)]
         self.assertEqual(sections.decode(sections.encode(pts)), pts)

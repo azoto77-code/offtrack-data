@@ -136,15 +136,36 @@ def _coords(el):
         return None
 
 
+# Exits the Polizia calls otherwise than OSM.
+NAMES = {
+    "PIACENZA NORD": "BASSO LODIGIANO",
+}
+
+# Words before an exit's name in the Polizia's list: "ALL SAN LAZZARO" is the junction of San Lazzaro.
+_LEADING = ("ALLACCIAMENTO ", "ALL ", "NODO ", "VIADOTTO ")
+
+
 def lookup(by_name, name):
-    """The junctions called [name]; when none is called just so, those whose name starts with it or that it starts
-    with, word by word ("SAN DONA" and "San Donà di Piave")."""
-    n = norm(name)
+    """The junctions called [name]. When none is called just so: those whose name starts with it or that it starts
+    with, word by word ("SAN DONA" and "San Donà di Piave"); else those whose name holds it, or that it holds, as
+    whole words of two or more letters ("CAMPEGINE" in "Terre di Canossa Campegine", "Corso Malta" in "VIADOTTO
+    CORSO MALTA")."""
+    n = norm(NAMES.get(name.strip().upper(), name))
+    for lead in _LEADING:
+        if n.startswith(lead) and len(n) > len(lead) + 2:
+            n = n[len(lead):]
+            break
     if n in by_name:
         return by_name[n]
     out = []
     for k, v in by_name.items():
         if k.startswith(n + " ") or n.startswith(k + " "):
+            out += v
+    if out:
+        return out
+    padded = f" {n} "
+    for k, v in by_name.items():
+        if f" {k} ".find(padded) >= 0 or (len(k) >= 6 and padded.find(f" {k} ") >= 0):
             out += v
     return out
 
