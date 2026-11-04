@@ -170,6 +170,90 @@ def lookup(by_name, name):
     return out
 
 
+# Interchanges the Polizia names by their roads: "ALL A15 A1 N" is where the A15 joins the A1, its northern branch.
+_INTERCHANGE = re.compile(r"^(?:ALL|ALLACCIAMENTO|NODO)\s+(.*?)(?:\s+(?:N|S|E|O|NORD|SUD|EST|OVEST))?$")
+_ROAD = re.compile(r"A\d+|SPV|RAC RM [NS]")
+# The motorways called otherwise on OSM: the "raccordi" of Rome are the A1's branches, A1dir.
+ROAD_REFS = {"RAC RM N": "A1DIR", "RAC RM S": "A1DIR"}
+
+# How near each other two roads come at their interchange, the links between them left out.
+INTERCHANGE_M = 1000.0
+
+# The points of a road taken as its interchange: both carriageways at the place where it comes nearest the other road.
+INTERCHANGE_NEAR_M = 150.0
+
+# Two places where the same roads meet are this far apart at least.
+INTERCHANGE_APART_M = 5000.0
+
+
+def interchange(name):
+    """The two roads of an interchange named by them, as refs of OSM: ("A15", "A1") for "ALL A15 A1 N"; None for an
+    exit named by a place, or with a road unknown."""
+    s = re.sub(r"[^A-Z0-9]+", " ", unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().upper()).strip()
+    m = _INTERCHANGE.match(s)
+    if not m:
+        return None
+    rest = m.group(1).strip()
+    roads = _ROAD.findall(rest)
+    if len(roads) != 2 or _ROAD.sub("", rest).strip():
+        return None
+    a, b = (ROAD_REFS.get(r, r) for r in roads)
+    return (a, b) if a != b else None
+
+
+def ref_key(ref):
+    return ref.replace(" ", "").upper()
+
+
+class RefNodes(osmium.SimpleHandler):
+    """The nodes of the motorways and trunk roads with one of [refs]: ref -> [(lat, lon)]."""
+
+    def __init__(self, refs):
+        super().__init__()
+        self.refs = refs
+        self.nodes = {r: [] for r in refs}
+
+    def way(self, w):
+        if w.tags.get("highway") not in TUTOR_CLASSES:
+            return
+        mine = {ref_key(r) for r in (w.tags.get("ref") or "").split(";")} & self.refs
+        for r in mine:
+            self.nodes[r] += [(n.location.lat, n.location.lon) for n in w.nodes if n.location.valid()]
+
+
+def meeting(xs, ys, reach=INTERCHANGE_M):
+    """Where the road of the points [xs] meets that of [ys]: at each place where it comes within [reach] of it, its
+    point nearest to it and its others within INTERCHANGE_NEAR_M of that one, the other carriageway."""
+    c = 0.015
+    grid = {}
+    for q in ys:
+        grid.setdefault((int(q[0] // c), int(q[1] // c)), []).append(q)
+    close = []
+    for p in xs:
+        gy, gx = int(p[0] // c), int(p[1] // c)
+        d = min((distance_m(p, q) for dy in (-1, 0, 1) for dx in (-1, 0, 1) for q in grid.get((gy + dy, gx + dx), ())),
+                default=math.inf)
+        if d <= reach:
+            close.append((d, p))
+    close.sort()
+    places = []
+    for _, p in close:
+        if all(distance_m(p, o) > INTERCHANGE_APART_M for o in places):
+            places.append(p)
+    return list({p for p in xs if any(distance_m(p, o) <= INTERCHANGE_NEAR_M for o in places)})
+
+
+def interchanges(pbf, pairs):
+    """The points of each interchange of [pairs] ((ref, ref)): on both roads, as junctions without an id."""
+    h = RefNodes({r for pair in pairs for r in pair})
+    h.apply_file(str(pbf), locations=True, idx="flex_mem")
+    out = {}
+    for a, b in pairs:
+        pts = meeting(h.nodes[a], h.nodes[b]) + meeting(h.nodes[b], h.nodes[a])
+        out[(a, b)] = [(None, lat, lon) for lat, lon in pts]
+    return out
+
+
 # ----------------------------------------------------------------------------------------------------- the roads
 
 
@@ -441,8 +525,13 @@ def build(pbf, tutor=None, dgt=None, log=print):
     wanted = []
     cells = set()
     missing = {}
+    # The interchanges named by their roads are found where the two roads meet: their names on OSM, when they have
+    # one, are not those of the list ("ALL A30 A1" would be any junction of the A30).
+    pairs = {interchange(n) for r in tutor or [] for n in r[:2]} - {None}
+    places = interchanges(pbf, pairs) if pairs else {}
     for da, a, d, note in tutor or []:
-        sa, sb = lookup(j.by_name, da), lookup(j.by_name, a)
+        sa = places.get(interchange(da)) or lookup(j.by_name, da)
+        sb = places.get(interchange(a)) or lookup(j.by_name, a)
         # "ROVIGO" found only as "Rovigo Sud", the other end: not the same exit twice.
         sa, sb = [x for x in sa if x not in sb], [y for y in sb if y not in sa]
         if not sa or not sb:

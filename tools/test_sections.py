@@ -6,7 +6,8 @@ import sections
 import tutor_pdf
 
 # A motorway along the parallel 44 with its two carriageways 30 m apart, the northern one going east: exits "Albisola"
-# at 8.40 and "Celle Ligure" at 8.45 on each, and a camera of MapAtlas near the eastern end.
+# at 8.40 and "Celle Ligure" at 8.45 on each. The A12 comes from the north and ends 80 m from it at 8.425, its links
+# left out as in the zones.
 OSM = """<?xml version='1.0' encoding='UTF-8'?>
 <osm version="0.6">
   <node id="1" lat="44.0003" lon="8.38"/>
@@ -19,10 +20,13 @@ OSM = """<?xml version='1.0' encoding='UTF-8'?>
   <node id="13" lat="44.0" lon="8.425"/>
   <node id="14" lat="44.0" lon="8.40"><tag k="highway" v="motorway_junction"/><tag k="name" v="Albisola"/></node>
   <node id="15" lat="44.0" lon="8.38"/>
+  <node id="21" lat="44.03" lon="8.425"/>
+  <node id="22" lat="44.0010" lon="8.425"/>
   <way id="100"><nd ref="1"/><nd ref="2"/><nd ref="3"/><nd ref="4"/><nd ref="5"/>
     <tag k="highway" v="motorway"/><tag k="ref" v="A10"/><tag k="maxspeed" v="130"/></way>
   <way id="101"><nd ref="11"/><nd ref="12"/><nd ref="13"/><nd ref="14"/><nd ref="15"/>
     <tag k="highway" v="motorway"/><tag k="ref" v="A10"/><tag k="maxspeed" v="130"/></way>
+  <way id="102"><nd ref="21"/><nd ref="22"/><tag k="highway" v="motorway"/><tag k="ref" v="A12;E80"/></way>
 </osm>
 """
 
@@ -109,6 +113,22 @@ class SectionsTest(unittest.TestCase):
         self.assertEqual(len(line), 2)
         self.assertEqual(west[0], "tutor-albisola-celle-ligure-ovest")
         self.assertEqual(west[4], "Albisola - Celle Ligure")
+
+    def test_interchange_names(self):
+        self.assertEqual(sections.interchange("ALL A15 A1 N"), ("A15", "A1"))
+        self.assertEqual(sections.interchange("NODO A4/A23"), ("A4", "A23"))
+        self.assertEqual(sections.interchange("ALL RAC RM-S A1 S"), ("A1DIR", "A1"))
+        self.assertIsNone(sections.interchange("ALL SAN LAZZARO"))
+        self.assertIsNone(sections.interchange("ALL. RAVENNA SUD"))
+
+    def test_tutor_from_an_interchange(self):
+        rows, _, missing = sections.build(self.osm, tutor=[("ALL A12 A10 N", "CELLE LIGURE", "OVEST", "")], log=lambda *_: None)
+        self.assertEqual(missing, {})
+        self.assertEqual(len(rows), 1)
+        # From where the A12 comes nearest, on the carriageway going east.
+        self.assertAlmostEqual(rows[0][2], 44.0003)
+        self.assertAlmostEqual(rows[0][3], 8.425, places=3)
+        self.assertAlmostEqual(int(rows[0][5]["section:m"]), 2002, delta=20)
 
     def test_tutor_name_not_found(self):
         rows, _, missing = sections.build(self.osm, tutor=[("ALBISOLA", "VARAZZE", "OVEST", "")], log=lambda *_: None)
