@@ -1,0 +1,49 @@
+name: Prova tratti
+
+# Temporary: tries sections.py on all of Italy. Removed before merging.
+on:
+  push:
+    branches: [claude/project-thread-5d96bd]
+    paths: [".github/workflows/prova-sezioni.yml", "tools/sections.py", "tools/data/**"]
+
+jobs:
+  prova:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: italia, extract: europe/italy, args: "--tutor tools/data/tutor.csv" }
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool python3-pyosmium
+      - name: Download
+        run: |
+          curl -fsSL --retry 3 -o dgt.xml https://nap.dgt.es/datex2/dgt/PredefinedLocationsPublication/radares/content.xml
+          curl -fsSL --retry 3 -o all.osm.pbf "https://download.geofabrik.de/${{ matrix.extract }}-latest.osm.pbf"
+          osmium tags-filter all.osm.pbf w/highway=motorway,trunk,primary,secondary,motorway_link,trunk_link n/highway=motorway_junction -o roads.osm.pbf
+          rm all.osm.pbf
+          ls -la
+      - name: Sections
+        run: /usr/bin/time -v python3 tools/sections.py roads.osm.pbf tratti.geojson ${{ matrix.args }} 2>&1 | grep -v "^\s*\(Page\|Socket\|Signals\|Swaps\|File system\|Average\|Exit\|Voluntary\|Involuntary\|Minor\|Major\|Percent\|Command\)"
+      - name: Longest against the straight line
+        run: |
+          python3 - <<'X'
+          import json, sys
+          sys.path.insert(0, "tools")
+          import sections as S
+          out = []
+          for f in json.load(open("tratti.geojson"))["features"]:
+              c = f["geometry"]["coordinates"]
+              m = f["properties"].get("section:m") or f["properties"].get("m")
+              line = S.distance_m((c[0][1], c[0][0]), (c[-1][1], c[-1][0]))
+              out.append((float(m) / max(line, 1), f["properties"].get("name"), m, round(line)))
+          for r in sorted(out, reverse=True)[:12]:
+              print(round(r[0], 2), r[1:])
+          X
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tratti-${{ matrix.name }}
+          path: |
+            tratti.geojson
+            uscite.txt
