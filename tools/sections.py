@@ -32,8 +32,10 @@ TUTOR_CLASSES = {"motorway", "trunk"}
 # interchange ("Villesse" on the ramp to the A34), and only when the carriageways alone give no way.
 LINKS = {"motorway_link", "trunk_link"}
 
-# The most of a stretch that may run on slip roads.
+# The most of a stretch that may run on slip roads; and how much longer than the straight line it may be then, as slip
+# roads can turn back at an interchange: a motorway is seldom a third longer.
 MAX_LINKS_M = 3000.0
+LINKS_DETOUR = 1.5
 
 # The longest stretch looked for: the Tutor stretches are 2 to 30 km long.
 MAX_SECTION_M = 45_000.0
@@ -427,6 +429,12 @@ def between(roads, grid, ps, qs, classes, limit, radius=SNAP_M):
     return length, [x] + [roads.coords[n] for n in path] + [y], [before] + path + [after]
 
 
+def plausible(roads, found):
+    """Whether a way found over slip roads keeps to them for a few metres and does not turn back."""
+    length, pts, path = found
+    return links_m(roads, path) <= MAX_LINKS_M and length <= distance_m(pts[0], pts[-1]) * LINKS_DETOUR + 1000
+
+
 def links_m(roads, path):
     """The metres of [path] on slip roads."""
     out = 0.0
@@ -598,7 +606,7 @@ def build(pbf, tutor=None, dgt=None, log=print):
                                 (TUTOR_CLASSES | LINKS, JUNCTION_M)):
             for sa, sb in tries:
                 found = between(roads, grid, sa, sb, classes, MAX_SECTION_M, radius=radius)
-                if found and (found[0] < MIN_SECTION_M or links_m(roads, found[2]) > MAX_LINKS_M):
+                if found and (found[0] < MIN_SECTION_M or (classes & LINKS and not plausible(roads, found))):
                     found = None
                 if found:
                     break
