@@ -561,8 +561,8 @@ jobs:
 
       - name: Write the index
         # The BRouter copy of this edition when it is there, the last copy published when this run made none,
-        # brouter.de otherwise (and in a pull request). Only the segments the server really has go in the list: a
-        # square of open sea has none.
+        # brouter.de otherwise (and in a pull request). Only the segments the server really has go in the list, each
+        # with its size: a square of open sea has none.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -577,9 +577,10 @@ jobs:
           fi
           : > segmenti.txt
           for s in $(jq -rs '[.[].brouter[]] | unique | .[]' zones/*/zona.json); do
-            code=$(curl -sSIL --retry 5 --retry-delay 30 --retry-all-errors -o /dev/null -w '%{http_code}' "$url/$s.rd5")
+            read -r code bytes < <(curl -sSIL --retry 5 --retry-delay 30 --retry-all-errors "$url/$s.rd5" | tr -d '\r' \
+              | awk '/^HTTP\// {c=$2} tolower($1)=="content-length:" {b=$2} END {print c, b+0}')
             case "$code" in
-              200) echo "$s" >> segmenti.txt ;;
+              200) echo "$s $bytes" >> segmenti.txt ;;
               404) echo "$s: non c'è" ;;
               *) echo "$s: errore $code"; exit 1 ;;
             esac
