@@ -8,7 +8,7 @@ joins the zona.json of every zone into indice.json, the list the app reads first
     zone_index.py zone OUT_DIR ZONES.json ID AREA.poly --edition 20261104 --tag zona-nord-ovest-20261104
                   --valhalla 3.6.3 --contours 20m-1 [--coastline COAST.geojson]
                   COAST.geojson is the coastline in the zone, to draw the outline along the shore and not out at sea
-    zone_index.py index OUT.json ZONA.json [ZONA.json ...] [--brouter-url URL] [--brouter-have LIST] [--contours 20m-1]
+    zone_index.py index OUT.json ZONA.json [ZONA.json ...] [--brouter-url URL] [--brouter-have LIST (segment [bytes] a line)] [--contours 20m-1]
                   [--zones ZONES.json]
                   LIST names the segments the URL really serves, one a line: the others leave the zones' lists;
                   ZONES.json lends every zone its names and legacy as they are now, not as they were when it was built
@@ -133,18 +133,28 @@ def index(a):
                 z.update(presentation(infos[z["id"]]))
     # A zone's box widened by 20 km touches 5x5 degree squares that are open sea, and brouter.de has no segment
     # for those: the list of what the server really has prunes them, or the app would ask for a file that is not there.
+    # The list gives each segment's size too ("E10_N40 171234567", one a line), so the app can tell the user what a
+    # zone really takes: the segments are downloaded after the zone's files and weigh as much as a small zone.
+    sizes = {}
     if a.brouter_have:
-        have = set(Path(a.brouter_have).read_text().split())
+        for line in Path(a.brouter_have).read_text().splitlines():
+            parts = line.split()
+            if parts:
+                sizes[parts[0]] = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
         for z in zones:
-            missing = [s for s in z["brouter"] if s not in have]
+            missing = [s for s in z["brouter"] if s not in sizes]
             if missing:
                 print(f"{z['id']}: senza i segmenti BRouter {', '.join(missing)}")
-                z["brouter"] = [s for s in z["brouter"] if s in have]
+                z["brouter"] = [s for s in z["brouter"] if s in sizes]
+    for z in zones:
+        z["brouter_bytes"] = sum(sizes.get(s, 0) for s in z["brouter"])
     doc = {
         "updated": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "base_url": BASE_URL,
         # The BRouter segments: the copy of this edition in a release of its own, or brouter.de when that failed.
         "brouter_url": a.brouter_url,
+        # Each segment with its size in bytes (0 when unknown): a zone's brouter_bytes is the sum of its own.
+        "brouter_segments": sizes,
         # The shared terrain, one release a row of squares: <terrain_url>/terreno-N44/N44E008.hgt.gz and
         # N44E008.curve.pmtiles, listed with their sizes in <terrain_url>/terreno-N44/terreno.json.
         "terrain_url": BASE_URL,
@@ -153,7 +163,7 @@ def index(a):
     }
     Path(a.out).write_text(json.dumps(doc, ensure_ascii=False, separators=(",", ":")))
     for z in doc["zones"]:
-        print(f"{z['id']}: {z['tag']}, {z['bytes'] / 1e6:.0f} MB")
+        print(f"{z['id']}: {z['tag']}, {z['bytes'] / 1e6:.0f} MB, BRouter {z['brouter_bytes'] / 1e6:.0f} MB")
 
 
 def terrain(a):
