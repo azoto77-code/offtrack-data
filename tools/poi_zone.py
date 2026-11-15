@@ -28,6 +28,7 @@ from shapely import contains_xy, prepare
 import cameras
 import france
 import sections
+from search_zone import LATIN_NAMES, norm
 from zone_area import read_poly, widen
 
 # PoiCatalog.kt, in its order: key, tags that must all be there (None = any value), special rule.
@@ -98,6 +99,10 @@ def kind_of(tags):
 def entry(prefix, osm_id, key, lat, lon, tags):
     kept = {k: tags[k] for k in KEPT if tags.get(k, "").strip()}
     name = tags.get("name", "").strip() or None
+    # A name with no letter the rider can read (مستشفى نزوى) gives way to the first Latin one, as in the search index:
+    # Nizwa Hospital. The local name stays among the card's tags.
+    if name and not norm(name):
+        name = next((v for v in (tags.get(k, "").split(";")[0].strip() for k in LATIN_NAMES) if norm(v)), name)
     return [f"{prefix}{osm_id}", key, round(lat, 7), round(lon, 7), name, kept]
 
 

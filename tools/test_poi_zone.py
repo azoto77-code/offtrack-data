@@ -77,6 +77,17 @@ class AreaTest(unittest.TestCase):
         e = entry("w", 22, "camp_site", 44.41, 8.41, {"name": " ", "opening_hours": "Mo-Su", "foo": "bar"})
         self.assertEqual(e, ["w22", "camp_site", 44.41, 8.41, None, {"opening_hours": "Mo-Su"}])
 
+    def test_a_name_in_another_script_gives_way_to_the_latin_one(self):
+        e = entry("n", 5, "hospital", 22.93, 57.53, {"name": "مستشفى نزوى", "name:en": "Nizwa Hospital"})
+        self.assertEqual(e[4], "Nizwa Hospital")
+        self.assertEqual(e[5], {"name": "مستشفى نزوى"})
+        e = entry("n", 6, "cafe", 22.93, 57.53, {"name": "مقهى", "int_name": "Maqha"})
+        self.assertEqual(e[4], "Maqha")
+        e = entry("n", 7, "cafe", 22.93, 57.53, {"name": "مقهى"})
+        self.assertEqual(e[4], "مقهى")
+        e = entry("n", 8, "cafe", 44.0, 8.0, {"name": "Bar Ligure", "name:en": "Ligurian Bar"})
+        self.assertEqual(e[4], "Bar Ligure")
+
     def test_a_place_wider_than_20_km_is_left_out(self):
         h = Points()
         self.assertTrue(h.fits("w1", (44.40, 8.40, 44.42, 8.42)))
