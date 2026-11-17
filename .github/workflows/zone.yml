@@ -354,15 +354,19 @@ jobs:
 
       - name: Build the difficulty map
         # Tracks and unpaved roads from zoom 11, paths from 12 ("minz"); beyond 14 the app enlarges the last level.
+        # The barriers on those roads go in their own layer "barriere", every one at every zoom (-r1: no point
+        # dropped below 14), as the app shows them at every zoom (0.288).
         run: |
           osmium tags-filter work/zone.osm.pbf w/highway -o work/roads.osm.pbf
           rm work/zone.osm.pbf work/poi.osm.pbf
-          python3 tools/difficulty_layer.py work/difficolta.geojsonseq work/roads.osm.pbf
-          tippecanoe -q -P -o out/difficolta.pmtiles -l difficolta \
+          osmium tags-filter work/roads.osm.pbf n/barrier -o work/barriers.osm.pbf
+          python3 tools/difficulty_layer.py work/difficolta.geojsonseq work/roads.osm.pbf \
+            --barriers work/barriere.geojsonseq work/barriers.osm.pbf
+          tippecanoe -q -P -o out/difficolta.pmtiles \
             -n "OffTrack difficoltà" -A "© OpenStreetMap contributors" \
-            -Z11 -z14 --no-feature-limit --no-tile-size-limit \
-            -j '{"*":["any",["==","minz",11],[">=","$zoom",12]]}' \
-            work/difficolta.geojsonseq
+            -Z11 -z14 -r1 --no-feature-limit --no-tile-size-limit \
+            -j '{"difficolta":["any",["==","minz",11],[">=","$zoom",12]]}' \
+            -L difficolta:work/difficolta.geojsonseq -L barriere:work/barriere.geojsonseq
           rm -r work
 
       - name: Cut the map
