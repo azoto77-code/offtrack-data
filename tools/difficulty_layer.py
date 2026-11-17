@@ -46,6 +46,9 @@ BANNED = {"no", "private", "agricultural", "forestry", "delivery", "customers", 
 KEPT = (
     "highway", "name", "ref", "tracktype", "surface", "smoothness", "access", "motor_vehicle",
     "motorcycle", "vehicle", "sac_scale", "mtb:scale", "incline", "width", "ford", "4wd_only",
+    # Shown on the card of a road from 0.289: tolls, seasonal closures, tunnels and bridges, the motorbike scale.
+    "toll", "access:conditional", "vehicle:conditional", "motor_vehicle:conditional", "motorcycle:conditional",
+    "motorcycle:scale", "tunnel", "bridge",
 )
 
 # Not roads, or not there yet or any more: as DifficultyFetch leaves them out.

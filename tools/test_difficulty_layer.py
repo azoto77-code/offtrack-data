@@ -95,6 +95,16 @@ class FeatureTest(unittest.TestCase):
         self.assertNotIn("guess", p)
         self.assertEqual(p["minz"], 11)
 
+    def test_seasonal_closures_and_tolls_reach_the_card(self):
+        t = {"highway": "track", "tracktype": "grade3", "toll": "yes", "tunnel": "yes",
+             "motor_vehicle:conditional": "no @ (Oct 20-May 31)"}
+        p = feature(10, t, self.line)["properties"]
+        self.assertEqual(p["toll"], "yes")
+        self.assertEqual(p["tunnel"], "yes")
+        self.assertEqual(p["motor_vehicle:conditional"], "no @ (Oct 20-May 31)")
+        # A seasonal closure does not close the way all year.
+        self.assertNotIn("banned", p)
+
     def test_paths_appear_later(self):
         f = feature(8, {"highway": "path", "sac_scale": "mountain_hiking"}, self.line)
         self.assertEqual(f["properties"]["minz"], 12)
