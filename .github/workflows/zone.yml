@@ -154,7 +154,7 @@ jobs:
           echo "$SOURCES" | python3 -c "import json, sys; [print(s['geofabrik'], s.get('boundary', 0)) for s in json.load(sys.stdin)]" \
             | while read -r path rel; do
                 f="work/src-$(echo "$path" | tr / -).osm.pbf"
-                curl -fsSL --retry 3 -o "$f" "$GEOFABRIK/$path-latest.osm.pbf"
+                curl -fsSL --retry 8 --retry-delay 60 --retry-all-errors -o "$f" "$GEOFABRIK/$path-latest.osm.pbf"
                 if [ "$rel" != 0 ]; then
                   # Only the country inside the extract; its border also cuts the zone below.
                   python3 tools/boundary_poly.py "$f" "$rel" "work/r$rel.poly"
@@ -208,7 +208,7 @@ jobs:
           mkdir -p areas valhalla
           echo "$ZONES" | python3 -c "import json, sys; [print(z['id'], z['geofabrik'], z.get('boundary', 0)) for z in json.load(sys.stdin)]" \
             | while read -r id path rel; do
-                if [ "$rel" = 0 ]; then curl -fsSL --retry 3 -o "areas/$id.poly" "$GEOFABRIK/$path.poly"
+                if [ "$rel" = 0 ]; then curl -fsSL --retry 8 --retry-delay 60 --retry-all-errors -o "areas/$id.poly" "$GEOFABRIK/$path.poly"
                 elif [ -f "work/r$rel.poly" ]; then cp "work/r$rel.poly" "areas/$id.poly"
                 else python3 tools/boundary_poly.py work/admin.osm.pbf "$rel" "areas/$id.poly"; fi
                 python3 tools/valhalla_zone.py work/tiles "valhalla/$id.tar" "areas/$id.poly"
@@ -278,7 +278,7 @@ jobs:
       - name: Download OpenStreetMap
         run: |
           mkdir -p work areas out
-          curl -fsSL --retry 3 -o work/zone.osm.pbf "$GEOFABRIK/${{ matrix.zone.geofabrik }}-latest.osm.pbf"
+          curl -fsSL --retry 8 --retry-delay 60 --retry-all-errors -o work/zone.osm.pbf "$GEOFABRIK/${{ matrix.zone.geofabrik }}-latest.osm.pbf"
           if [ "$REL" != 0 ]; then
             # A country or a region inside a larger extract: its border as the block job cut it from the whole
             # block (from the extract itself when that is missing), and only what lies within.
@@ -287,7 +287,7 @@ jobs:
             osmium extract -p "areas/$ID.poly" work/zone.osm.pbf -o work/cut.osm.pbf
             mv work/cut.osm.pbf work/zone.osm.pbf
           else
-            curl -fsSL --retry 3 -o "areas/$ID.poly" "$GEOFABRIK/${{ matrix.zone.geofabrik }}.poly"
+            curl -fsSL --retry 8 --retry-delay 60 --retry-all-errors -o "areas/$ID.poly" "$GEOFABRIK/${{ matrix.zone.geofabrik }}.poly"
           fi
           # The coastline, to draw the outline of the zone along the shore: the border runs out to sea.
           osmium tags-filter work/zone.osm.pbf w/natural=coastline -o work/coast.osm.pbf
@@ -382,7 +382,13 @@ jobs:
             curl -fsI "$url" > /dev/null && break
           done
           echo "Mappa da $url"
-          pmtiles-cli/pmtiles extract "$url" out/mappa.pmtiles --region=area.geojson --maxzoom=15 --download-threads=8
+          # The world file sometimes answers 500 for a moment: three tries, a minute apart.
+          for try in 1 2 3; do
+            pmtiles-cli/pmtiles extract "$url" out/mappa.pmtiles --region=area.geojson --maxzoom=15 --download-threads=8 && break
+            [ "$try" = 3 ] && exit 1
+            rm -f out/mappa.pmtiles
+            sleep 60
+          done
           rm -r pmtiles-cli area.geojson
 
       - name: Take the terrain from the last edition
