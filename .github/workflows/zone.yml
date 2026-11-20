@@ -50,6 +50,9 @@ on:
       - "tools/test_poi_zone.py"
       - "tools/search_zone.py"
       - "tools/test_search_zone.py"
+      - "tools/map_filter.py"
+      - "tools/test_map_filter.py"
+      - "tools/test_zone_index.py"
 
 permissions:
   contents: write
@@ -267,7 +270,7 @@ jobs:
 
       - name: Check the tools
         working-directory: tools
-        run: python3 -m unittest test_poi_zone test_cameras test_sections test_france test_search_zone test_difficulty_layer -v
+        run: python3 -m unittest test_poi_zone test_cameras test_sections test_france test_search_zone test_difficulty_layer test_map_filter test_zone_index -v
 
       - name: Take the border of the zone
         uses: actions/download-artifact@v4
@@ -384,12 +387,15 @@ jobs:
           echo "Mappa da $url"
           # The world file sometimes answers 500 for a moment: three tries, a minute apart.
           for try in 1 2 3; do
-            pmtiles-cli/pmtiles extract "$url" out/mappa.pmtiles --region=area.geojson --maxzoom=15 --download-threads=8 && break
+            pmtiles-cli/pmtiles extract "$url" mappa-intera.pmtiles --region=area.geojson --maxzoom=15 --download-threads=8 && break
             [ "$try" = 3 ] && exit 1
-            rm -f out/mappa.pmtiles
+            rm -f mappa-intera.pmtiles
             sleep 60
           done
-          rm -r pmtiles-cli area.geojson
+          # Without the land uses and the small points the styles of the app never draw: a seventh to a third lighter.
+          python3 tools/map_filter.py filter mappa-intera.pmtiles out/mappa.pmtiles
+          pmtiles-cli/pmtiles verify out/mappa.pmtiles
+          rm -r pmtiles-cli area.geojson mappa-intera.pmtiles
 
       - name: Take the terrain from the last edition
         id: terrain
@@ -433,10 +439,15 @@ jobs:
         run: |
           mv "valhalla/$ID.tar" out/valhalla.tar
           rm -r valhalla
+          # The routing tiles travel at two fifths of their size as gzip. The copy stays out of "files" in zona.json,
+          # named under "packed": an app that does not know it keeps downloading valhalla.tar, and nothing else.
+          mkdir packed
+          gzip -6 -n -c out/valhalla.tar > packed/valhalla.tar.gz
           python3 tools/zone_index.py zone out zone/zone.json "$ID" "areas/$ID.poly" \
             --edition "${{ needs.prepare.outputs.edition }}" --tag "$TAG" --valhalla "$VALHALLA" --contours "$CONTOURS" \
-            --coastline coast.geojson
-          rm coast.geojson
+            --coastline coast.geojson --packed packed
+          mv packed/* out/
+          rm -r coast.geojson packed
           ls -la out
 
       - name: Keep the test files

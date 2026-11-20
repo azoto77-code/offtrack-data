@@ -6,8 +6,10 @@ and sha256 of each file, so the app downloads again only the files that changed 
 joins the zona.json of every zone into indice.json, the list the app reads first.
 
     zone_index.py zone OUT_DIR ZONES.json ID AREA.poly --edition 20261104 --tag zona-nord-ovest-20261104
-                  --valhalla 3.6.3 --contours 20m-1 [--coastline COAST.geojson]
-                  COAST.geojson is the coastline in the zone, to draw the outline along the shore and not out at sea
+                  --valhalla 3.6.3 --contours 20m-1 [--coastline COAST.geojson] [--packed DIR]
+                  COAST.geojson is the coastline in the zone, to draw the outline along the shore and not out at sea;
+                  DIR holds the gzip copies of files of OUT_DIR (valhalla.tar.gz for valhalla.tar), published beside
+                  them: "packed" in zona.json names each, for the app that downloads the copy and unpacks it
     zone_index.py index OUT.json ZONA.json [ZONA.json ...] [--brouter-url URL] [--brouter-have LIST (segment [bytes] a line)] [--contours 20m-1]
                   [--zones ZONES.json]
                   LIST names the segments the URL really serves, one a line: the others leave the zones' lists;
@@ -55,6 +57,22 @@ def describe(path):
     return {"bytes": path.stat().st_size, "sha256": sha.hexdigest()}
 
 
+def packed(directory, files):
+    """The gzip copies in [directory] of the zone's [files]: for each file that has one, the name, size and sha256 of
+    the copy. They stay out of "files": an app that knows nothing of them downloads every file listed there, and
+    would take both."""
+    out = {}
+    for f in sorted(Path(directory).iterdir()):
+        if not f.is_file():
+            continue
+        if f.suffix != ".gz" or f.name[:-3] not in files:
+            raise SystemExit(f"{f.name}: non è la copia compressa di un file della zona")
+        if f.name in files:
+            raise SystemExit(f"{f.name}: c'è già un file della zona con questo nome")
+        out[f.name[:-3]] = {"file": f.name, **describe(f)}
+    return out
+
+
 def zone(a):
     zones = json.loads(Path(a.zones).read_text())
     info = next(z for z in zones["zones"] if z["id"] == a.id)
@@ -78,6 +96,9 @@ def zone(a):
         "outline": outline(land(area, read_coastline(a.coastline)) if a.coastline else area),
         "files": files,
         "bytes": sum(f["bytes"] for f in files.values()),
+        # Files that travel smaller as a gzip copy: "valhalla.tar": {"file": "valhalla.tar.gz", "bytes", "sha256"}.
+        # The app downloads the copy, unpacks it and checks the result against the sha256 in "files".
+        **({"packed": packed(a.packed, files)} if a.packed else {}),
         "valhalla": a.valhalla,
         "contours": a.contours,
         "brouter": segments(wide),
@@ -101,7 +122,8 @@ def zone(a):
     (Path(a.out) / "zona.json").write_text(json.dumps(doc, ensure_ascii=False, separators=(",", ":")))
     print(f"{doc['name']}: {doc['bytes'] / 1e6:.0f} MB")
     for name, f in files.items():
-        print(f"  {name}: {f['bytes'] / 1e6:.1f} MB")
+        copy = doc.get("packed", {}).get(name)
+        print(f"  {name}: {f['bytes'] / 1e6:.1f} MB" + (f", {copy['bytes'] / 1e6:.1f} MB compresso" if copy else ""))
     print(f"  BRouter: {', '.join(doc['brouter'])}")
     rings = doc["outline"]["coordinates"] if doc["outline"]["type"] == "MultiPolygon" else [doc["outline"]["coordinates"]]
     print(f"  contorno: {len(rings)} poligoni, {sum(len(r[0]) for r in rings)} punti")
@@ -196,6 +218,7 @@ def main():
     z.add_argument("--valhalla", required=True)
     z.add_argument("--contours", required=True)
     z.add_argument("--coastline")
+    z.add_argument("--packed")
     i = sub.add_parser("index")
     i.add_argument("out")
     i.add_argument("zones", nargs="+")
